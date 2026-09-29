@@ -11,6 +11,9 @@ dependencies = [
 ]
 
 [dependency-groups]
+dev = [
+    "ruff>=0.16.9",
+]
 export = [
     "accelerate>=1.15.0",
     "diffusers>=0.40.0",
@@ -31,3 +34,22 @@ torch = { index = "pytorch-cpu" }
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # import 정렬
+    "B",   # 흔한 버그 패턴
+    "C4",  # comprehension 개선
+    "UP",  # Python 문법 현대화
+    "PIE", # 불필요한 코드 검사
+    "T10", # 디버거 잔여 코드 검사
+]
+# 줄 길이는 formatter에 맡긴다.
+ignore = ["E501"]

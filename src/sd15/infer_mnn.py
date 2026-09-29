@@ -76,7 +76,8 @@ def forward(model, inputs, output_name):
 
     output = interpreter.getSessionOutput(session, output_name)
     host = MNN.Tensor(
-        output.getShape(), MNN.Halide_Type_Float,
+        output.getShape(),
+        MNN.Halide_Type_Float,
         np.zeros(output.getShape(), dtype=np.float32),
         MNN.Tensor_DimensionType_Caffe,
     )
@@ -91,7 +92,9 @@ def forward(model, inputs, output_name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--prompt", default="a photo of a cat sitting on a wooden table, natural light")
+    parser.add_argument(
+        "--prompt", default="a photo of a cat sitting on a wooden table, natural light"
+    )
     parser.add_argument("--negative-prompt", default="")
     parser.add_argument("--steps", type=int, default=20)
     parser.add_argument("--seed", type=int, default=None)
@@ -117,19 +120,27 @@ def main():
     config = json.loads((snapshot / "scheduler/scheduler_config.json").read_text())
     vae_config = json.loads((snapshot / "vae/config.json").read_text())
     if config["beta_schedule"] != "scaled_linear" or config.get("clip_sample", False):
-        raise ValueError("This smoke runner expects the SD1.5 scaled-linear noise schedule")
+        raise ValueError(
+            "This smoke runner expects the SD1.5 scaled-linear noise schedule"
+        )
     if config.get("prediction_type", "epsilon") != "epsilon":
         raise ValueError("Only epsilon prediction is supported")
 
     # 두 프롬프트를 숫자로 변환
-    tokenizer = CLIPTokenizer.from_pretrained(snapshot / "tokenizer", local_files_only=True)
+    tokenizer = CLIPTokenizer.from_pretrained(
+        snapshot / "tokenizer", local_files_only=True
+    )
     encoder = load_model(root / "mnn/text_encoder.mnn", args.threads)
     embeddings = []
     for prompt in (args.negative_prompt, args.prompt):
-        ids = tokenizer(prompt, padding="max_length", max_length=77, truncation=True, return_tensors="np").input_ids
-        embeddings.append(
-            forward(encoder, {"input_ids": ids}, "last_hidden_state")
-        )
+        ids = tokenizer(
+            prompt,
+            padding="max_length",
+            max_length=77,
+            truncation=True,
+            return_tensors="np",
+        ).input_ids
+        embeddings.append(forward(encoder, {"input_ids": ids}, "last_hidden_state"))
 
     # 텍스트 인코더 참조 해제
     del encoder
@@ -141,12 +152,24 @@ def main():
     stride = train_steps // args.steps
     timesteps = np.arange(args.steps)[::-1] * stride + config.get("steps_offset", 0)
 
-    betas = np.linspace(config["beta_start"] ** 0.5, config["beta_end"] ** 0.5, train_steps, dtype=np.float32) ** 2
+    betas = (
+        np.linspace(
+            config["beta_start"] ** 0.5,
+            config["beta_end"] ** 0.5,
+            train_steps,
+            dtype=np.float32,
+        )
+        ** 2
+    )
     alphas = np.cumprod(1 - betas)
     final_alpha = np.float32(1) if config.get("set_alpha_to_one", True) else alphas[0]
 
     # 초기 랜덤 latent를 만들고 UNet을 로딩
-    latent = np.random.default_rng(args.seed).standard_normal((1, 4, 64, 64)).astype(np.float32)
+    latent = (
+        np.random.default_rng(args.seed)
+        .standard_normal((1, 4, 64, 64))
+        .astype(np.float32)
+    )
     unet = load_model(root / "mnn/unet.mnn", args.threads)
 
     # 매 단계마다 UNet을 두번 실행하고 CFG를 계산
@@ -157,11 +180,17 @@ def main():
             # sample: 현재 노이즈가 섞인 latent
             # timestep: 현재 노이즈 단계
             # encoder_hidden_states: 프롬프트 임베딩
-            predictions.append(forward(unet, {
-                "sample": latent,
-                "timestep": np.array([timestep], dtype=np.int32),
-                "encoder_hidden_states": context,
-            }, "out_sample"))
+            predictions.append(
+                forward(
+                    unet,
+                    {
+                        "sample": latent,
+                        "timestep": np.array([timestep], dtype=np.int32),
+                        "encoder_hidden_states": context,
+                    },
+                    "out_sample",
+                )
+            )
         # CFG
         noise = predictions[0] + args.guidance * (predictions[1] - predictions[0])
 
@@ -174,20 +203,31 @@ def main():
         clean = (latent - np.sqrt(1 - alpha) * noise) / np.sqrt(alpha)
 
         # 현재 latent와 예측한 노이즈로부터 노이즈가 없는 latent를 추정
-        latent = (np.sqrt(alpha_previous) * clean + np.sqrt(1 - alpha_previous) * noise).astype(np.float32)
+        latent = (
+            np.sqrt(alpha_previous) * clean + np.sqrt(1 - alpha_previous) * noise
+        ).astype(np.float32)
 
         if not np.isfinite(latent).all():
             raise FloatingPointError("Non-finite latent")
-        print(f"Step {index + 1}/{args.steps}, t={timestep}, "f"{time.perf_counter() - step_start:.1f}s", flush=True)
+        print(
+            f"Step {index + 1}/{args.steps}, t={timestep}, "
+            f"{time.perf_counter() - step_start:.1f}s",
+            flush=True,
+        )
 
     del unet
     gc.collect()
 
     # 최종 latent를 이미지 텐서로 디코딩
     decoder = load_model(root / "mnn/vae_decoder.mnn", args.threads)
-    decoded = forward(decoder, {
-        "latent_sample": latent / np.float32(vae_config.get("scaling_factor", 0.18215))
-    }, "sample")
+    decoded = forward(
+        decoder,
+        {
+            "latent_sample": latent
+            / np.float32(vae_config.get("scaling_factor", 0.18215))
+        },
+        "sample",
+    )
 
     if decoded.shape != (1, 3, 512, 512):
         raise ValueError(f"Unexpected decoded shape: {decoded.shape}")
@@ -197,11 +237,15 @@ def main():
     image = Image.fromarray(np.rint(pixels * 255).astype(np.uint8))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     image.save(args.output)
-    metadata = vars(args) | {"output": str(args.output), "backend": "MNN CPU",
-                             "scheduler": "DDIM eta=0", "config_revision": revision,
-                             "seconds": time.perf_counter() - started,
-                             "decoded_min": float(decoded.min()),
-                             "decoded_max": float(decoded.max())}
+    metadata = vars(args) | {
+        "output": str(args.output),
+        "backend": "MNN CPU",
+        "scheduler": "DDIM eta=0",
+        "config_revision": revision,
+        "seconds": time.perf_counter() - started,
+        "decoded_min": float(decoded.min()),
+        "decoded_max": float(decoded.max()),
+    }
     args.output.with_suffix(".json").write_text(json.dumps(metadata, indent=2))
     print(f"Saved {args.output} ({image.size}), {metadata['seconds']:.1f}s", flush=True)
 

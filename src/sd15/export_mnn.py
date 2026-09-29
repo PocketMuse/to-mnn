@@ -5,6 +5,7 @@ from pathlib import Path
 ONNX_DIR = Path("/artifacts/onnx")
 MNN_DIR = Path("/artifacts/mnn")
 
+
 def export_component(name):
     """모델 하나를 변환하고 로그와 출력 파일로 성공 여부를 확인
 
@@ -33,9 +34,13 @@ def export_component(name):
         # Run MNN Convert
         result = subprocess.run(
             [
-                "mnnconvert", "-f", "ONNX",
-                "--modelFile", str(source),
-                "--MNNModel", str(output),
+                "mnnconvert",
+                "-f",
+                "ONNX",
+                "--modelFile",
+                str(source),
+                "--MNNModel",
+                str(output),
                 "--fp16",
             ],
             stdout=log,

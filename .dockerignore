@@ -1,3 +1,4 @@
 /models
 /artifacts
 .venv
+.ruff_cache/

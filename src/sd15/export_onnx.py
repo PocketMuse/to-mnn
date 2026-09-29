@@ -1,7 +1,7 @@
 from pathlib import Path
 
-import torch
 import onnx
+import torch
 from diffusers import StableDiffusionPipeline
 from diffusers.models.attention_processor import AttnProcessor
 
@@ -10,20 +10,24 @@ CONFIG_REPO = "stable-diffusion-v1-5/stable-diffusion-v1-5"
 CACHE_DIR = Path("/artifacts/huggingface")
 ONNX_DIR = Path("/artifacts/onnx")
 
+
 class TextEncoderExport(torch.nn.Module):
     def __init__(self, text_encoder):
         super().__init__()
         self.text_encoder = text_encoder
+
     def forward(self, input_ids):
         return self.text_encoder(
             input_ids=input_ids,
             return_dict=False,
         )[0]
 
+
 class UNetExport(torch.nn.Module):
     def __init__(self, unet):
         super().__init__()
         self.unet = unet
+
     def forward(self, sample, timestep, encoder_hidden_states):
         return self.unet(
             sample=sample,
@@ -32,15 +36,15 @@ class UNetExport(torch.nn.Module):
             return_dict=False,
         )[0]
 
+
 class VAEDecoderExport(torch.nn.Module):
     def __init__(self, vae):
         super().__init__()
         self.vae = vae
+
     def forward(self, latent_sample):
-        return self.vae.decode(
-            latent_sample,
-            return_dict=False
-        )[0]
+        return self.vae.decode(latent_sample, return_dict=False)[0]
+
 
 def load_pipeline() -> StableDiffusionPipeline:
     if not CHECKPOINT.is_file():
@@ -76,7 +80,6 @@ def load_pipeline() -> StableDiffusionPipeline:
     return pipeline
 
 
-
 def export_pipeline(pipeline):
     @torch.no_grad()
     def export_component(model, inputs, name, input_names, output_names):
@@ -94,7 +97,7 @@ def export_pipeline(pipeline):
             input_names=input_names,
             output_names=output_names,
             dynamic_axes=None,
-            dynamo=False
+            dynamo=False,
         )
 
         onnx.checker.check_model(str(output_path))

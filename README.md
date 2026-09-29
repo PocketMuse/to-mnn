@@ -81,3 +81,15 @@ MSYS_NO_PATHCONV=1 docker run --rm --network none \
 ```
 
 > seed 미지정시 랜덤
+
+# 코드 검사 및 포맷
+
+```bash
+uv run --locked --only-dev ruff check .
+uv run --locked --only-dev ruff format --check .
+```
+
+```bash
+uv run --locked --only-dev ruff check --fix .
+uv run --locked --only-dev ruff format .
+```
