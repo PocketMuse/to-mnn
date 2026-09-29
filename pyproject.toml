@@ -3,5 +3,31 @@ name = "to-mnn"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
-dependencies = []
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mnn>=3.6.1",
+    "numpy>=2.5.3",
+    "transformers>=5.17.0",
+]
+
+[dependency-groups]
+export = [
+    "accelerate>=1.15.0",
+    "diffusers>=0.40.0",
+    "onnx>=1.23.0",
+    "onnxruntime>=1.30.0",
+    "safetensors>=0.8.0",
+    "torch>=2.14.0",
+]
+runtime = [
+    "ftfy>=6.3.1",
+    "pillow>=12.3.0",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
