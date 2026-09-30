@@ -1,0 +1,19 @@
+FROM to-mnn:export-onnx
+
+ARG MNN_REF=d407447ed56c4121a11ccbd266dc184ca1ead0c2
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends flatbuffers-compiler curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Runtime 패키지 MNN과 생성된 스키마의 namespace를 분리한다.
+RUN mkdir -p /opt/mnn-schema/source \
+    && cd /opt/mnn-schema/source \
+    && for file in MNN CaffeOp TensorflowOp TFQuantizeOp ExtraInfo UserDefine Tensor Type; do \
+        curl -fsSL --retry 3 "https://raw.githubusercontent.com/alibaba/MNN/${MNN_REF}/schema/default/${file}.fbs" -o "${file}.fbs"; \
+    done \
+    && sed -i 's/namespace MNN;/namespace mnn_schema;/' *.fbs \
+    && flatc --python -o /opt/mnn-schema *.fbs
+
+ENV PYTHONPATH=/opt/mnn-schema:/workspace
+COPY src /workspace/src
+ENTRYPOINT ["python", "-m", "src.sd15.gen_template"]

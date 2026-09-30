@@ -82,6 +82,61 @@ MSYS_NO_PATHCONV=1 docker run --rm --network none \
 
 > seed 미지정시 랜덤
 
+## 5. 템플릿 생성 (개발 PC)
+
+* 앞 단계의 safetensors, ONNX, MNN을 사용
+* `to-mnn:export-onnx` 이미지가 필요
+* 출력: `artifacts/templates/sd15/{graph.bin,manifest.json}`
+
+```bash
+docker build -f Dockerfile.gen-template -t to-mnn:gen-template .
+MSYS_NO_PATHCONV=1 docker run --rm --network none \
+  -v "$(pwd -W)/models:/models:ro" \
+  -v "$(pwd -W)/artifacts:/artifacts" \
+  to-mnn:gen-template
+```
+
+> `graph.bin`은 고정된 그래프 데이터고, `manifest.json`은 가중치를 어디에 어떤 형식으로 넣을지 정의한 파일
+
+## 6. C++ 스트리밍 변환
+
+```bash
+docker build -f Dockerfile.cpp.sd15 -t to-mnn:cpp-sd15 .
+MSYS_NO_PATHCONV=1 docker run --rm --network none \
+  --memory=64m --memory-swap=64m \
+  -v "$(pwd -W)/models:/models:ro" \
+  -v "$(pwd -W)/artifacts:/artifacts" \
+  to-mnn:cpp-sd15 \
+  --checkpoint /models/v1-5-pruned-emaonly.safetensors \
+  --template-dir /artifacts/templates/sd15 \
+  --output /artifacts/mnn-cpp
+```
+
+> `--chunk-bytes`로 입력 버퍼를 조정할 수 있음
+
+## 7. 변환 결과를 텐서 단위로 비교
+
+* 기준 MNN과 C++로 복원한 MNN의 텐서 이름, shape, dtype, 저장값과 그래프 바이트가 일치하는지 비교
+* 결과는 `tensor-comparison.json`
+```bash
+MSYS_NO_PATHCONV=1 docker run --rm --network none \
+  --entrypoint python \
+  -v "$(pwd -W)/artifacts:/artifacts" \
+  to-mnn:gen-template -m src.sd15.compare_mnn \
+  --reference /artifacts/mnn \
+  --candidate /artifacts/mnn-cpp \
+  --manifest /artifacts/templates/sd15/manifest.json
+```
+
+* 작은 테스트 데이터를 만들어 변환기, 템플릿, 생성기, 비교기 코드가 정상 동작하는지 검사
+* 잘못된 입력을 거부하는지 확인하며 실제 모델 파일은 불필요
+```bash
+docker build -f Dockerfile.cpp.sd15 -t to-mnn:cpp-sd15 .
+docker build -f Dockerfile.gen-template -t to-mnn:gen-template .
+docker build -f Dockerfile.test.sd15 -t to-mnn:test-sd15 .
+docker run --rm --network none to-mnn:test-sd15
+```
+
 # 코드 검사 및 포맷
 
 ```bash
