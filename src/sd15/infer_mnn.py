@@ -1,42 +1,103 @@
 import argparse
 import gc
+import importlib
+import importlib.util
 import json
+import os
 import secrets
+import sys
+import sysconfig
 import time
 from pathlib import Path
 
-import MNN
 import numpy as np
-from PIL import Image
-from transformers import CLIPTokenizer
+
+BACKEND_IDS = {"CPU": 0, "OPENCL": 3}
+SESSION_INFO_BACKENDS = 2
+GPU_TUNING_NONE = 1 << 0
+GPU_MEMORY_MODES = {"buffer": 1 << 6, "image": 1 << 7}
+PROJECT_DIR = Path(__file__).resolve().parents[2]
 
 
-def load_model(path, threads):
-    """MNN 모델을 로딩하고 CPU 추론 세션을 생성
+def load_runtime(runtime_dir=None):
+    """설치된 패키지 또는 직접 빌드한 Windows Runtime 바인딩을 읽는다."""
+    if runtime_dir is None:
+        return importlib.import_module("MNN")
+
+    root = Path(runtime_dir).resolve()
+    suffix = sysconfig.get_config_var("EXT_SUFFIX")
+    binding = root / "python" / f"_mnncengine{suffix}"
+    dll_dir = root / "build"
+    for path in (binding, dll_dir / "MNN.dll"):
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"Missing {path}; run bash scripts/build-mnn.sh --python"
+            )
+    if os.name != "nt":
+        raise RuntimeError("--runtime-dir requires the Windows native Runtime")
+
+    loaded = sys.modules.get("MNN") or sys.modules.get("_mnncengine")
+    if loaded is not None:
+        if Path(loaded.__file__).resolve() != binding:
+            raise RuntimeError(
+                "Another MNN binding is already loaded; use a new process"
+            )
+        return loaded
+
+    dll_handle = os.add_dll_directory(str(dll_dir))
+    try:
+        spec = importlib.util.spec_from_file_location("_mnncengine", binding)
+        runtime = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runtime)
+    except Exception:
+        dll_handle.close()
+        raise
+
+    # 공식 바인딩은 Session/Tensor 생성 시 MNN 모듈을 다시 찾는다.
+    sys.modules["_mnncengine"] = runtime
+    sys.modules["MNN"] = runtime
+    runtime._dll_handle = dll_handle
+    return runtime
+
+
+def load_model(path, threads, backend="CPU", gpu_memory="buffer", runtime=None):
+    """MNN 모델을 로딩하고 지정한 백엔드의 추론 세션을 생성한다.
 
     Args:
         path (Path): 로딩할 .mnn 파일 경로
         threads (int): CPU 추론에 사용할 스레드 수
 
     Returns:
-        tuple: forward()에서 함께 사용할 (interpreter, session)
+        tuple: forward()에서 함께 사용할 (runtime, interpreter, session)
     """
-    print(f"Loading {path.name}", flush=True)
-    interpreter = MNN.Interpreter(str(path))
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    runtime = load_runtime() if runtime is None else runtime
+    print(f"Loading {path.name} ({backend})", flush=True)
+    interpreter = runtime.Interpreter(str(path))
     external = Path(str(path) + ".weight")
     if external.is_file():
         interpreter.setExternalFile(str(external))
-    session = interpreter.createSession(
-        {"backend": "CPU", "numThread": threads, "precision": "high"}
+    mode = (
+        threads if backend == "CPU" else GPU_TUNING_NONE | GPU_MEMORY_MODES[gpu_memory]
     )
-    return interpreter, session
+    session = interpreter.createSession(
+        {"backend": backend, "numThread": mode, "precision": "high"}
+    )
+    actual = interpreter.getSessionInfo(session, SESSION_INFO_BACKENDS)
+    if backend == "OPENCL" and actual != BACKEND_IDS[backend]:
+        raise RuntimeError(
+            f"Requested OPENCL, but {path.name} selected backend {actual}"
+        )
+    print(f"Session backend: {actual}", flush=True)
+    return runtime, interpreter, session
 
 
 def forward(model, inputs, output_name):
     """MNN 모델을 한 번 실행하고 지정한 출력을 NumPy 배열로 반환
 
     Args:
-        model (tuple): load_model()이 반환한 (interpreter, session)
+        model (tuple): load_model()이 반환한 (runtime, interpreter, session)
         inputs (dict[str, np.ndarray]): 모델 입력 이름과 NumPy 배열의 매핑
         output_name (str): 가져올 모델 출력 이름
 
@@ -49,7 +110,7 @@ def forward(model, inputs, output_name):
         RuntimeError: MNN 세션 실행이 실패할 때
         FloatingPointError: 출력에 NaN 또는 무한값이 포함될 때
     """
-    interpreter, session = model
+    MNN, interpreter, session = model
     tensors = interpreter.getSessionInputAll(session)
 
     if set(inputs) != set(tensors):
@@ -100,7 +161,24 @@ def main():
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--guidance", type=float, default=7.5)
     parser.add_argument("--threads", type=int, default=4)
-    parser.add_argument("--output", type=Path, default=Path("/img/mnn_sd15.png"))
+    parser.add_argument("--backend", choices=BACKEND_IDS, default="CPU")
+    parser.add_argument("--gpu-memory", choices=GPU_MEMORY_MODES, default="buffer")
+    parser.add_argument(
+        "--runtime-dir", type=Path, help="Native MNNRuntime directory (Windows)"
+    )
+    parser.add_argument(
+        "--artifacts-dir",
+        type=Path,
+        default=PROJECT_DIR / "artifacts" if os.name == "nt" else Path("/artifacts"),
+    )
+    parser.add_argument("--model-dir", type=Path, help="Defaults to artifacts-dir/mnn")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=PROJECT_DIR / "img/mnn_sd15.png"
+        if os.name == "nt"
+        else Path("/img/mnn_sd15.png"),
+    )
     args = parser.parse_args()
 
     if not 1 <= args.steps <= 999 or args.threads < 1:
@@ -110,9 +188,27 @@ def main():
 
     print(f"Seed: {args.seed}", flush=True)
 
+    if args.backend == "OPENCL" and os.name == "nt" and args.runtime_dir is None:
+        args.runtime_dir = PROJECT_DIR / "MNNRuntime"
+    runtime = load_runtime(args.runtime_dir)
+    print(f"MNN binding: {runtime.__file__}", flush=True)
+    model_options = {
+        "threads": args.threads,
+        "backend": args.backend,
+        "gpu_memory": args.gpu_memory,
+        "runtime": runtime,
+    }
+
     # 시간 세팅, 모델 설정값 읽어오고 검사
     started = time.perf_counter()
-    root = Path("/artifacts")
+    root = args.artifacts_dir
+    args.model_dir = args.model_dir or root / "mnn"
+    for name in ("text_encoder", "unet", "vae_decoder"):
+        path = args.model_dir / f"{name}.mnn"
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"Missing model: {path}; set --model-dir or --artifacts-dir"
+            )
     cache = root / "huggingface/models--stable-diffusion-v1-5--stable-diffusion-v1-5"
     revision = (cache / "refs/main").read_text().strip()
     snapshot = cache / "snapshots" / revision
@@ -127,10 +223,13 @@ def main():
         raise ValueError("Only epsilon prediction is supported")
 
     # 두 프롬프트를 숫자로 변환
+    from PIL import Image
+    from transformers import CLIPTokenizer
+
     tokenizer = CLIPTokenizer.from_pretrained(
         snapshot / "tokenizer", local_files_only=True
     )
-    encoder = load_model(root / "mnn/text_encoder.mnn", args.threads)
+    encoder = load_model(args.model_dir / "text_encoder.mnn", **model_options)
     embeddings = []
     for prompt in (args.negative_prompt, args.prompt):
         ids = tokenizer(
@@ -170,7 +269,7 @@ def main():
         .standard_normal((1, 4, 64, 64))
         .astype(np.float32)
     )
-    unet = load_model(root / "mnn/unet.mnn", args.threads)
+    unet = load_model(args.model_dir / "unet.mnn", **model_options)
 
     # 매 단계마다 UNet을 두번 실행하고 CFG를 계산
     for index, timestep in enumerate(timesteps):
@@ -219,7 +318,7 @@ def main():
     gc.collect()
 
     # 최종 latent를 이미지 텐서로 디코딩
-    decoder = load_model(root / "mnn/vae_decoder.mnn", args.threads)
+    decoder = load_model(args.model_dir / "vae_decoder.mnn", **model_options)
     decoded = forward(
         decoder,
         {
@@ -237,9 +336,13 @@ def main():
     image = Image.fromarray(np.rint(pixels * 255).astype(np.uint8))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     image.save(args.output)
-    metadata = vars(args) | {
-        "output": str(args.output),
-        "backend": "MNN CPU",
+    metadata = {
+        key: str(value) if isinstance(value, Path) else value
+        for key, value in vars(args).items()
+    } | {
+        "backend": f"MNN {args.backend}",
+        "runtime_binding": runtime.__file__,
+        "precision": "high",
         "scheduler": "DDIM eta=0",
         "config_revision": revision,
         "seconds": time.perf_counter() - started,

@@ -137,6 +137,27 @@ docker build -f Dockerfile.test.sd15 -t to-mnn:test-sd15 .
 docker run --rm --network none to-mnn:test-sd15
 ```
 
+# Windows Native OpenCL Runtime Infer
+
+Requires:
+* Git Bash
+* MSVC x64
+* Windows SDK
+* CMake
+* Ninja
+* uv
+* Python 3.12
+* OpenCL 지원 GPU 드라이버
+
+```bash
+uv sync --locked --group runtime
+scripts/build-mnn.sh --python
+uv run -m src.sd15.infer_mnn --backend OPENCL
+```
+
+> output: `img/mnn_sd15.png`
+
+
 # 코드 검사 및 포맷
 
 ```bash
