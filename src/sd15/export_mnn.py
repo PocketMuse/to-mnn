@@ -1,3 +1,4 @@
+import argparse
 import os
 import subprocess
 from pathlib import Path
@@ -6,7 +7,9 @@ ONNX_DIR = Path("/artifacts/onnx")
 MNN_DIR = Path("/artifacts/mnn")
 
 
-def export_component(name):
+def export_component(
+    name, onnx_dir=ONNX_DIR, output_dir=MNN_DIR, transformer_fuse=False
+):
     """모델 하나를 변환하고 로그와 출력 파일로 성공 여부를 확인
 
     Args:
@@ -15,14 +18,14 @@ def export_component(name):
     Returns:
         Path: 생성된 .mnn 파일 경로
     """
-    source = ONNX_DIR / name / "model.onnx"
-    output = MNN_DIR / f"{name}.mnn"
-    log_path = MNN_DIR / f"{name}.convert.log"
+    source = onnx_dir / name / "model.onnx"
+    output = output_dir / f"{name}.mnn"
+    log_path = output_dir / f"{name}.convert.log"
 
     if not source.is_file():
         raise FileNotFoundError(f"ONNX model not found: {source}")
 
-    MNN_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # MNN 로그 모듈이 시도하는 부가 SDK의 pip 다운로드를 차단
     env = os.environ.copy()
@@ -42,6 +45,7 @@ def export_component(name):
                 "--MNNModel",
                 str(output),
                 "--fp16",
+                *(["--transformerFuse"] if transformer_fuse else []),
             ],
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -60,13 +64,21 @@ def export_component(name):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Convert SD1.5 ONNX models to MNN")
+    parser.add_argument("--onnx-dir", type=Path, default=ONNX_DIR)
+    parser.add_argument("--output-dir", type=Path, default=MNN_DIR)
+    parser.add_argument("--transformer-fuse", action="store_true")
+    args = parser.parse_args()
+
     for name in ("text_encoder", "unet", "vae_decoder"):
-        source = ONNX_DIR / name / "model.onnx"
+        source = args.onnx_dir / name / "model.onnx"
         if not source.is_file():
             raise FileNotFoundError(f"ONNX model not found: {source}")
 
     for name in ("text_encoder", "unet", "vae_decoder"):
-        output = export_component(name)
+        output = export_component(
+            name, args.onnx_dir, args.output_dir, args.transformer_fuse
+        )
         print(f"Saved {output}", flush=True)
 
 

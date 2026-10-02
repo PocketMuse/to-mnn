@@ -41,6 +41,14 @@ docker build -f Dockerfile.export-mnn -t to-mnn:export-mnn .
 docker run --rm --network none \
   -v "$(pwd -W)/artifacts:/artifacts" \
   to-mnn:export-mnn
+
+# Fusion MNN 생성
+docker run --rm --network none \
+  -v "$(pwd -W)/artifacts:/artifacts" \
+  to-mnn:export-mnn \
+  python /workspace/sd15/export_mnn.py \
+  --transformer-fuse \
+  --output-dir /artifacts/mnn-fusion-docker
 ```
 
 * 입력: `artifacts/onnx/{text_encoder,unet,vae_decoder}/model.onnx`
@@ -150,9 +158,19 @@ Requires:
 * OpenCL 지원 GPU 드라이버
 
 ```bash
+# 공통 준비
 uv sync --locked --group runtime
 scripts/build-mnn.sh --python
-uv run -m src.sd15.infer_mnn --backend OPENCL
+
+# Fusion 미적용
+uv run -m src.sd15.infer_mnn --backend OPENCL \
+  --model-dir artifacts/mnn \
+  --output img/no_fusion.png
+
+# Fusion 적용
+uv run -m src.sd15.infer_mnn --backend OPENCL \
+  --model-dir artifacts/mnn-fusion-docker \
+  --output img/fusion.png
 ```
 
 > output: `img/mnn_sd15.png`
