@@ -92,6 +92,8 @@ uv run -m src.sd15.infer_mnn \
 * 앞 단계의 safetensors, ONNX, MNN을 사용
 * `to-mnn:export-onnx` 이미지가 필요
 * 출력: `artifacts/templates/sd15/{graph.bin,manifest.json}`
+* `--transformerFuse`로 생성된 비양자화 `AttentionParam`은 고정 그래프 바이트로 보존
+* 템플릿 생성·복원·바이트 비교는 GPU 없이 실행하며, OpenCL 추론 검증과는 별개
 
 ```bash
 docker build -f Dockerfile.gen-template -t to-mnn:gen-template .

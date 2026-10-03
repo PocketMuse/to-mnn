@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+from mnn_schema.AttentionParam import AttentionParam
 from mnn_schema.Blob import Blob
 from mnn_schema.Convolution2D import Convolution2D
 from mnn_schema.DataType import DataType
@@ -136,6 +137,13 @@ class MnnModel:
                 raise ValueError(f"{name}: per-op external paths are unsupported")
             kind = names[op.MainType()]
             if kind in parameterless:
+                continue
+            if kind == "AttentionParam":
+                attention = AttentionParam()
+                attention.Init(op.Main().Bytes, op.Main().Pos)
+                if attention.MhqQuantLength():
+                    raise ValueError(f"{name}: quantized Attention is unsupported")
+                # Q/K/V는 입력 텐서다. Attention 설정은 고정 그래프 바이트로 보존한다.
                 continue
             classes = {
                 "Blob": Blob,

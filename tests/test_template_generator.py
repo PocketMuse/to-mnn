@@ -53,6 +53,22 @@ class TemplateGenerationTest(unittest.TestCase):
         self.assertEqual({s["key"] for s in tensors}, set(self.weights))
         self.assertEqual(len(tensors), 3)
 
+    def test_fused_attention_is_preserved_in_template(self):
+        path = self.mnn / "text_encoder.mnn"
+        write_model(path, [0, 0], attention_scale=0.125)
+        generate(self.checkpoint, self.onnx, self.mnn, self.output)
+        manifest = json.loads((self.output / "manifest.json").read_text())
+        graph = (self.output / "graph.bin").read_bytes()
+        output = next(f for f in manifest["files"] if f["name"] == path.name)
+        restored = bytearray()
+        for segment in output["segments"]:
+            if segment["kind"] == "literal":
+                start = segment["template_offset"]
+                restored.extend(graph[start : start + segment["size"]])
+            else:
+                restored.extend(bytes(segment["size"]))
+        self.assertEqual(restored, path.read_bytes())
+
     def test_ambiguous_mapping_fails_and_removes_only_new_output(self):
         self.weights["duplicate"] = self.weights["unet.weight"].copy()
         save_file(self.weights, str(self.checkpoint))
