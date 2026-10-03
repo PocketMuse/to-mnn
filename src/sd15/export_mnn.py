@@ -5,11 +5,17 @@ from pathlib import Path
 
 ONNX_DIR = Path("/artifacts/onnx")
 MNN_DIR = Path("/artifacts/mnn")
+CONVERT_OPTIONS = (
+    "--fp16",
+    "--transformerFuse",
+    "--optimizePrefer",
+    "2",
+    "--optimizeLevel",
+    "1",
+)
 
 
-def export_component(
-    name, onnx_dir=ONNX_DIR, output_dir=MNN_DIR, transformer_fuse=False
-):
+def export_component(name, onnx_dir=ONNX_DIR, output_dir=MNN_DIR):
     """모델 하나를 변환하고 로그와 출력 파일로 성공 여부를 확인
 
     Args:
@@ -44,8 +50,7 @@ def export_component(
                 str(source),
                 "--MNNModel",
                 str(output),
-                "--fp16",
-                *(["--transformerFuse"] if transformer_fuse else []),
+                *CONVERT_OPTIONS,
             ],
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -67,7 +72,6 @@ def main():
     parser = argparse.ArgumentParser(description="Convert SD1.5 ONNX models to MNN")
     parser.add_argument("--onnx-dir", type=Path, default=ONNX_DIR)
     parser.add_argument("--output-dir", type=Path, default=MNN_DIR)
-    parser.add_argument("--transformer-fuse", action="store_true")
     args = parser.parse_args()
 
     for name in ("text_encoder", "unet", "vae_decoder"):
@@ -76,9 +80,7 @@ def main():
             raise FileNotFoundError(f"ONNX model not found: {source}")
 
     for name in ("text_encoder", "unet", "vae_decoder"):
-        output = export_component(
-            name, args.onnx_dir, args.output_dir, args.transformer_fuse
-        )
+        output = export_component(name, args.onnx_dir, args.output_dir)
         print(f"Saved {output}", flush=True)
 
 

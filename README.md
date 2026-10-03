@@ -28,6 +28,7 @@ docker run --rm \
 
 * 출력은 `artifacts/onnx/{text_encoder,unet,vae_decoder}/model.onnx`와 필요한 외부 가중치
 * 설정/tokenizer는 `artifacts/huggingface`에 캐시
+* Windows 추론에서도 읽을 수 있도록 캐시의 Linux 파일 링크를 일반 파일로 자동 교체
 
 > 재실행시 기존 ONNX 결과를 덮어씀
 
@@ -41,56 +42,52 @@ docker build -f Dockerfile.export-mnn -t to-mnn:export-mnn .
 docker run --rm --network none \
   -v "$(pwd -W)/artifacts:/artifacts" \
   to-mnn:export-mnn
-
-# Fusion MNN 생성
-docker run --rm --network none \
-  -v "$(pwd -W)/artifacts:/artifacts" \
-  to-mnn:export-mnn \
-  python /workspace/sd15/export_mnn.py \
-  --transformer-fuse \
-  --output-dir /artifacts/mnn-fusion-docker
 ```
 
 * 입력: `artifacts/onnx/{text_encoder,unet,vae_decoder}/model.onnx`
 * 출력: `artifacts/mnn/{text_encoder,unet,vae_decoder}.mnn`
 * 변환 로그: `artifacts/mnn/{모델명}.convert.log`
 * `unet.mnn.weight`가 생성되면 `unet.mnn`과 함께 보관
-* `--fp16` 가중치 저장 옵션으로 변환하며, 실패하면 중단
+* 변환 설정 고정: `--fp16 --transformerFuse --optimizePrefer 2 --optimizeLevel 1`
 
 > 재실행시 같은 이름의 모델과 로그를 덮어씀
 
-## 4. 추론 이미지 빌드 및 이미지 생성
+## 4. MNNRuntime 빌드
+
+Requires:
+* Git Bash
+* MSVC x64
+* Windows SDK
+* CMake
+* Ninja
+* uv
+* Python 3.12
+* OpenCL 지원 GPU 드라이버
 
 ```bash
-docker build -f Dockerfile.runtime -t to-mnn:runtime .
-mkdir -p img
+uv sync --locked --group runtime
+bash scripts/build-mnn.sh --python
 ```
 
-기존 설정/tokenizer 캐시와 MNN 모델을 사용해 네트워크 없이 생성합니다.
+* MNN 3.6.1 소스를 내려받아 OpenCL Runtime과 Python 바인딩을 빌드
+* `--python`은 5번의 Python 추론 실행에 필요
+* Runtime 출력: `MNNRuntime/build/MNN.dll`
+* Python 바인딩: `MNNRuntime/python/_mnncengine*.pyd`
+* 빌드 로그: `MNNRuntime/{configure,build,python-configure,python-build}.log`
+
+## 5. 이미지 추론
 
 ```bash
-MSYS_NO_PATHCONV=1 docker run --rm --network none \
-  -v "$(pwd -W)/artifacts:/artifacts:ro" \
-  -v "$(pwd -W)/img:/img" \
-  to-mnn:runtime
-```
-
-```bash
-MSYS_NO_PATHCONV=1 docker run --rm --network none \
-  -v "$(pwd -W)/artifacts:/artifacts:ro" \
-  -v "$(pwd -W)/img:/img" \
-  to-mnn:runtime \
+uv run -m src.sd15.infer_mnn \
   --prompt "a photo of a cat sitting on a wooden table, natural light" \
   --steps 20 \
-  --seed 42 \
   --guidance 7.5 \
-  --threads 4 \
-  --output /img/cat_seed42.png
+  --output img/cat.png
 ```
 
 > seed 미지정시 랜덤
 
-## 5. 템플릿 생성 (개발 PC)
+## 6. 템플릿 생성 (개발 PC)
 
 * 앞 단계의 safetensors, ONNX, MNN을 사용
 * `to-mnn:export-onnx` 이미지가 필요
@@ -144,36 +141,6 @@ docker build -f Dockerfile.gen-template -t to-mnn:gen-template .
 docker build -f Dockerfile.test.sd15 -t to-mnn:test-sd15 .
 docker run --rm --network none to-mnn:test-sd15
 ```
-
-# Windows Native OpenCL Runtime Infer
-
-Requires:
-* Git Bash
-* MSVC x64
-* Windows SDK
-* CMake
-* Ninja
-* uv
-* Python 3.12
-* OpenCL 지원 GPU 드라이버
-
-```bash
-# 공통 준비
-uv sync --locked --group runtime
-scripts/build-mnn.sh --python
-
-# Fusion 미적용
-uv run -m src.sd15.infer_mnn --backend OPENCL \
-  --model-dir artifacts/mnn \
-  --output img/no_fusion.png
-
-# Fusion 적용
-uv run -m src.sd15.infer_mnn --backend OPENCL \
-  --model-dir artifacts/mnn-fusion-docker \
-  --output img/fusion.png
-```
-
-> output: `img/mnn_sd15.png`
 
 
 # 코드 검사 및 포맷

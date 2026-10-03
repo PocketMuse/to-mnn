@@ -17,10 +17,11 @@ RUN apt-get update \
 
 COPY pyproject.toml uv.lock ./
 COPY src/sd15/export_onnx.py /workspace/src/sd15/export_onnx.py
+COPY src/sd15/prepare_runtime_cache.py /workspace/src/sd15/prepare_runtime_cache.py
 
 RUN uv sync --locked \
     --no-default-groups \
     --group export \
     --no-install-project
 
-CMD ["python", "/workspace/src/sd15/export_onnx.py"]
+CMD ["python", "-m", "src.sd15.export_onnx"]

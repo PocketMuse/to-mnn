@@ -43,19 +43,14 @@ class NativeInferenceTest(unittest.TestCase):
             "b": np.arange(1, 7, dtype=np.float32).reshape(3, 2),
         }
         with tempfile.TemporaryDirectory() as directory:
-            for backend, memory in (
-                ("CPU", "buffer"),
-                ("OPENCL", "buffer"),
-                ("OPENCL", "image"),
-            ):
-                with self.subTest(backend=backend, memory=memory):
-                    path = Path(directory) / f"{backend}-{memory}.mnn"
+            for backend in ("CPU", "OPENCL"):
+                with self.subTest(backend=backend):
+                    path = Path(directory) / f"{backend}.mnn"
                     expression.save([output], str(path))
                     model = load_model(
                         path,
                         4,
                         backend=backend,
-                        gpu_memory=memory,
                         runtime=self.runtime,
                     )
                     result = forward(model, inputs, "product")

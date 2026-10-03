@@ -14,8 +14,10 @@ import numpy as np
 
 BACKEND_IDS = {"CPU": 0, "OPENCL": 3}
 SESSION_INFO_BACKENDS = 2
+RUNTIME_BACKEND = "OPENCL"
+RUNTIME_PRECISION = "high"
 GPU_TUNING_NONE = 1 << 0
-GPU_MEMORY_MODES = {"buffer": 1 << 6, "image": 1 << 7}
+GPU_MEMORY_BUFFER = 1 << 6
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 
 
@@ -60,7 +62,7 @@ def load_runtime(runtime_dir=None):
     return runtime
 
 
-def load_model(path, threads, backend="CPU", gpu_memory="buffer", runtime=None):
+def load_model(path, threads=4, backend=RUNTIME_BACKEND, runtime=None):
     """MNN 모델을 로딩하고 지정한 백엔드의 추론 세션을 생성한다.
 
     Args:
@@ -74,22 +76,24 @@ def load_model(path, threads, backend="CPU", gpu_memory="buffer", runtime=None):
         raise FileNotFoundError(path)
     runtime = load_runtime() if runtime is None else runtime
     print(f"Loading {path.name} ({backend})", flush=True)
+    started = time.perf_counter()
     interpreter = runtime.Interpreter(str(path))
     external = Path(str(path) + ".weight")
     if external.is_file():
         interpreter.setExternalFile(str(external))
-    mode = (
-        threads if backend == "CPU" else GPU_TUNING_NONE | GPU_MEMORY_MODES[gpu_memory]
-    )
+    mode = threads if backend == "CPU" else GPU_TUNING_NONE | GPU_MEMORY_BUFFER
     session = interpreter.createSession(
-        {"backend": backend, "numThread": mode, "precision": "high"}
+        {"backend": backend, "numThread": mode, "precision": RUNTIME_PRECISION}
     )
     actual = interpreter.getSessionInfo(session, SESSION_INFO_BACKENDS)
     if backend == "OPENCL" and actual != BACKEND_IDS[backend]:
         raise RuntimeError(
             f"Requested OPENCL, but {path.name} selected backend {actual}"
         )
-    print(f"Session backend: {actual}", flush=True)
+    print(
+        f"Session backend: {actual}, load/tune: {time.perf_counter() - started:.3f}s",
+        flush=True,
+    )
     return runtime, interpreter, session
 
 
@@ -160,9 +164,6 @@ def main():
     parser.add_argument("--steps", type=int, default=20)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--guidance", type=float, default=7.5)
-    parser.add_argument("--threads", type=int, default=4)
-    parser.add_argument("--backend", choices=BACKEND_IDS, default="CPU")
-    parser.add_argument("--gpu-memory", choices=GPU_MEMORY_MODES, default="buffer")
     parser.add_argument(
         "--runtime-dir", type=Path, help="Native MNNRuntime directory (Windows)"
     )
@@ -181,21 +182,18 @@ def main():
     )
     args = parser.parse_args()
 
-    if not 1 <= args.steps <= 999 or args.threads < 1:
-        parser.error("steps must be 1..999 and threads must be positive")
+    if not 1 <= args.steps <= 999:
+        parser.error("steps must be 1..999")
     if args.seed is None:
         args.seed = secrets.randbits(32)
 
     print(f"Seed: {args.seed}", flush=True)
 
-    if args.backend == "OPENCL" and os.name == "nt" and args.runtime_dir is None:
+    if os.name == "nt" and args.runtime_dir is None:
         args.runtime_dir = PROJECT_DIR / "MNNRuntime"
     runtime = load_runtime(args.runtime_dir)
     print(f"MNN binding: {runtime.__file__}", flush=True)
     model_options = {
-        "threads": args.threads,
-        "backend": args.backend,
-        "gpu_memory": args.gpu_memory,
         "runtime": runtime,
     }
 
@@ -340,9 +338,11 @@ def main():
         key: str(value) if isinstance(value, Path) else value
         for key, value in vars(args).items()
     } | {
-        "backend": f"MNN {args.backend}",
+        "backend": f"MNN {RUNTIME_BACKEND}",
         "runtime_binding": runtime.__file__,
-        "precision": "high",
+        "precision": RUNTIME_PRECISION,
+        "gpu_memory": "buffer",
+        "gpu_tuning": "none",
         "scheduler": "DDIM eta=0",
         "config_revision": revision,
         "seconds": time.perf_counter() - started,

@@ -5,6 +5,8 @@ import torch
 from diffusers import StableDiffusionPipeline
 from diffusers.models.attention_processor import AttnProcessor
 
+from .prepare_runtime_cache import prepare_runtime_cache
+
 CHECKPOINT = Path("/models/v1-5-pruned-emaonly.safetensors")
 CONFIG_REPO = "stable-diffusion-v1-5/stable-diffusion-v1-5"
 CACHE_DIR = Path("/artifacts/huggingface")
@@ -158,6 +160,7 @@ def export_pipeline(pipeline):
 
 def main() -> None:
     pipeline = load_pipeline()
+    prepare_runtime_cache()
 
     print("UNet input channels:", pipeline.unet.config.in_channels)
     print("UNet sample size:", pipeline.unet.config.sample_size)
