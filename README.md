@@ -29,6 +29,8 @@ docker run --rm \
 * 출력은 `artifacts/onnx/{text_encoder,unet,vae_decoder}/model.onnx`와 필요한 외부 가중치
 * 설정/tokenizer는 `artifacts/huggingface`에 캐시
 * Windows 추론에서도 읽을 수 있도록 캐시의 Linux 파일 링크를 일반 파일로 자동 교체
+* UNet의 마스크 없는 Attention은 `bmm × scale`로 export하여 대형 0 상수 생성을 방지
+* 기존 export 결과에는 이 수정이 적용되지 않으므로 ONNX → MNN → 템플릿을 다시 생성해야 함
 
 > 재실행시 기존 ONNX 결과를 덮어씀
 

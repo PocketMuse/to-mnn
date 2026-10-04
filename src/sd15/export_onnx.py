@@ -1,9 +1,10 @@
 from pathlib import Path
+from types import MethodType
 
 import onnx
 import torch
 from diffusers import StableDiffusionPipeline
-from diffusers.models.attention_processor import AttnProcessor
+from diffusers.models.attention_processor import Attention, AttnProcessor
 
 from .prepare_runtime_cache import prepare_runtime_cache
 
@@ -11,6 +12,28 @@ CHECKPOINT = Path("/models/v1-5-pruned-emaonly.safetensors")
 CONFIG_REPO = "stable-diffusion-v1-5/stable-diffusion-v1-5"
 CACHE_DIR = Path("/artifacts/huggingface")
 ONNX_DIR = Path("/artifacts/onnx")
+
+
+def unmasked_attention_scores(self, query, key, attention_mask=None):
+    """export 시 beta=0의 거대한 0 상수와 Add 생성을 피한다."""
+    if attention_mask is not None:
+        return Attention.get_attention_scores(self, query, key, attention_mask)
+
+    dtype = query.dtype
+    if self.upcast_attention:
+        query, key = query.float(), key.float()
+    scores = torch.bmm(query, key.transpose(-1, -2)) * self.scale
+    if self.upcast_softmax:
+        scores = scores.float()
+    return scores.softmax(dim=-1).to(dtype)
+
+
+def prepare_unet_attention(unet):
+    """UNet 인스턴스의 export용 Attention만 교체한다."""
+    for module in unet.modules():
+        if isinstance(module, Attention):
+            module.set_processor(AttnProcessor())
+            module.get_attention_scores = MethodType(unmasked_attention_scores, module)
 
 
 class TextEncoderExport(torch.nn.Module):
@@ -108,7 +131,7 @@ def export_pipeline(pipeline):
     torch.manual_seed(0)
 
     pipeline.text_encoder.set_attn_implementation("eager")
-    pipeline.unet.set_attn_processor(AttnProcessor())
+    prepare_unet_attention(pipeline.unet)
     pipeline.vae.set_attn_processor(AttnProcessor())
 
     batch_size = 1
