@@ -1,6 +1,8 @@
 """MNN 3.6.1의 직렬화된 텐서 구간을 읽는다. 모델 실행은 하지 않는다."""
 
+import math
 import mmap
+import struct
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +19,9 @@ from mnn_schema.OpParameter import OpParameter
 from .template_values import MNN_VERSION
 
 FP16_QUANT_TYPE = 3
+DENSE_QUANT_TYPE = 1
+W8_BITS = 8
+W8_VALUE_COUNT = 1 << W8_BITS
 
 
 @dataclass
@@ -30,6 +35,7 @@ class TensorSlot:
     size: int
     dtype: str
     shape: list[int]
+    quantization: dict | None = None
 
 
 class MnnModel:
@@ -41,6 +47,8 @@ class MnnModel:
     def __init__(self, path):
         """MNN 3.6.1 파일을 열고 지원하는 저장 구조의 텐서를 수집한다."""
         self.path = Path(path)
+        if not self.path.is_file():
+            raise FileNotFoundError(f"MNN model not found: {self.path}")
         self.files = {}
         self.buffers = {}
         try:
@@ -86,7 +94,7 @@ class MnnModel:
             """비어 있지 않은 텐서의 크기와 파일 범위를 검증해 등록한다."""
             if not size:
                 return
-            widths = {"F16": 2, "F32": 4, "I32": 4, "I64": 8}
+            widths = {"F16": 2, "F32": 4, "I32": 4, "I64": 8, "U8": 1}
             if size != int(np.prod(shape, dtype=object)) * widths[dtype]:
                 raise ValueError(f"{op}/{field}: shape and byte length disagree")
             if (
@@ -113,6 +121,64 @@ class MnnModel:
             finally:
                 # 검증 예외의 traceback이 mmap 참조를 붙잡지 않게 한다.
                 del array
+
+        def dense(op, conv, quant, shape):
+            """dense W8의 고정 헤더를 검증하고 payload·alpha 구간을 등록한다."""
+            if (
+                quant.AMaxOrBits() != W8_BITS
+                or quant.AMin() != -128
+                or quant.UseInt32()
+                or quant.HasScaleInt()
+                or quant.ScaleStorage() != 0
+                or quant.AlphaFp16Length()
+            ):
+                raise ValueError(
+                    f"{op}: unsupported dense W8 configuration "
+                    f"(bits={quant.AMaxOrBits()}, aMin={quant.AMin()}, "
+                    f"readType={quant.ReadType()}, scaleStorage={quant.ScaleStorage()}, "
+                    f"alphaFp16={quant.AlphaFp16Length()}); "
+                    "expected asymmetric W8 with FP32 min/scale. "
+                    "Prepare the reference with --weightQuantAsymmetric=1 --hqq"
+                )
+            array = quant.BufferAsNumpy()
+            try:
+                if not isinstance(array, np.ndarray) or not array.size:
+                    raise ValueError(f"{op}: missing W8 payload")
+                offset = array.ctypes.data - base
+                width = 4 if quant.ShapeInt32() else 2
+                if array.size < 1 + 2 * width + 1 + W8_VALUE_COUNT:
+                    raise ValueError(f"{op}: truncated W8 header")
+                header = buffer[offset : offset + 1 + 2 * width + 1 + W8_VALUE_COUNT]
+                if header[0] != 2:
+                    raise ValueError(f"{op}: expected two W8 dimensions")
+                groups, area = struct.unpack_from(
+                    "<2I" if width == 4 else "<2H", header, 1
+                )
+                table = bytes(range(128, 256)) + bytes(range(128))
+                if header[1 + 2 * width] != 0 or header[2 + 2 * width :] != table:
+                    raise ValueError(f"{op}: unsupported W8 value table")
+                if not groups or not area or groups * area != math.prod(shape):
+                    raise ValueError(f"{op}: W8 shape mismatch")
+                if quant.ReadType() != groups or quant.AlphaLength() != groups * 2:
+                    raise ValueError(f"{op}: W8 alpha/group mismatch")
+                if array.size != len(header) + groups * area:
+                    raise ValueError(f"{op}: W8 payload length mismatch")
+                info = {"bits": W8_BITS, "group_elements": area, "group_count": groups}
+                add(
+                    op,
+                    "Weight",
+                    self.path.name,
+                    offset + len(header),
+                    groups * area,
+                    "U8",
+                    shape,
+                )
+                slots[-1].quantization = info
+            finally:
+                del array
+            inline(op, quant, "Alpha", "F32", [groups, 2])
+            slots[-1].quantization = info
+            inline(op, conv, "Bias", "F32", [shape[0]])
 
         parameterless = {
             "NONE",
@@ -184,6 +250,11 @@ class MnnModel:
                     common.KernelX(),
                 ]
                 quant = obj.QuanParameter()
+                if quant is not None and quant.Type() == DENSE_QUANT_TYPE:
+                    if ext:
+                        raise ValueError(f"{name}: external dense W8 is unsupported")
+                    dense(name, obj, quant, shape)
+                    continue
                 if quant is None or quant.Type() != FP16_QUANT_TYPE:
                     raise ValueError(f"{name}: expected FP16 convolution storage")
                 if ext:

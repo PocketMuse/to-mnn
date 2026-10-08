@@ -22,4 +22,4 @@ RUN uv sync --locked \
     --no-default-groups \
     --no-install-project
 
-CMD ["python", "/workspace/sd15/export_mnn.py"]
+ENTRYPOINT ["python", "/workspace/sd15/export_mnn.py"]

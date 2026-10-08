@@ -4,7 +4,17 @@ import unittest
 from pathlib import Path
 
 import flatbuffers
-from mnn_schema import AttentionParam, Blob, ExtraInfo, Net, Op, TensorQuantInfo
+from mnn_schema import (
+    AttentionParam,
+    Blob,
+    Convolution2D,
+    Convolution2DCommon,
+    ExtraInfo,
+    IDSTQuan,
+    Net,
+    Op,
+    TensorQuantInfo,
+)
 from mnn_schema.DataType import DataType
 from mnn_schema.OpParameter import OpParameter
 from mnn_schema.OpType import OpType
@@ -79,6 +89,62 @@ def write_model(
     path.write_bytes(builder.Output())
 
 
+def write_quant_model(
+    path,
+    payload=b"\x00\xff",
+    alpha=(-1.0, 2 / 255),
+    *,
+    bits=8,
+    wide=False,
+    minimum=-128,
+):
+    """두 원소의 dense W8 convolution을 만든다."""
+    builder = flatbuffers.Builder(512)
+    version = builder.CreateString("3.6.1")
+    name = builder.CreateString("conv")
+    header = bytes([2]) + struct.pack("<2I" if wide else "<2H", 1, 2)
+    header += bytes([0]) + bytes(range(128, 256)) + bytes(range(128))
+    buffer = builder.CreateByteVector(header + payload)
+    IDSTQuan.IDSTQuanStartAlphaVector(builder, len(alpha))
+    for value in reversed(alpha):
+        builder.PrependFloat32(value)
+    scales = builder.EndVector()
+    IDSTQuan.IDSTQuanStart(builder)
+    IDSTQuan.IDSTQuanAddBuffer(builder, buffer)
+    IDSTQuan.IDSTQuanAddAlpha(builder, scales)
+    IDSTQuan.IDSTQuanAddType(builder, 1)
+    IDSTQuan.IDSTQuanAddAMaxOrBits(builder, bits)
+    IDSTQuan.IDSTQuanAddAMin(builder, minimum)
+    IDSTQuan.IDSTQuanAddReadType(builder, 1)
+    IDSTQuan.IDSTQuanAddShapeInt32(builder, wide)
+    quant = IDSTQuan.IDSTQuanEnd(builder)
+    Convolution2DCommon.Convolution2DCommonStart(builder)
+    Convolution2DCommon.Convolution2DCommonAddInputCount(builder, 2)
+    Convolution2DCommon.Convolution2DCommonAddOutputCount(builder, 1)
+    common = Convolution2DCommon.Convolution2DCommonEnd(builder)
+    Convolution2D.Convolution2DStart(builder)
+    Convolution2D.Convolution2DAddCommon(builder, common)
+    Convolution2D.Convolution2DAddQuanParameter(builder, quant)
+    conv = Convolution2D.Convolution2DEnd(builder)
+    Op.OpStart(builder)
+    Op.OpAddName(builder, name)
+    Op.OpAddMainType(builder, OpParameter.Convolution2D)
+    Op.OpAddMain(builder, conv)
+    Op.OpAddType(builder, OpType.Convolution)
+    op = Op.OpEnd(builder)
+    Net.NetStartOplistsVector(builder, 1)
+    builder.PrependUOffsetTRelative(op)
+    ops = builder.EndVector()
+    ExtraInfo.ExtraInfoStart(builder)
+    ExtraInfo.ExtraInfoAddVersion(builder, version)
+    extra = ExtraInfo.ExtraInfoEnd(builder)
+    Net.NetStart(builder)
+    Net.NetAddExtraInfo(builder, extra)
+    Net.NetAddOplists(builder, ops)
+    builder.Finish(Net.NetEnd(builder))
+    path.write_bytes(builder.Output())
+
+
 class MnnComparisonTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -89,10 +155,45 @@ class MnnComparisonTest(unittest.TestCase):
         self.reference = root / "a/model.mnn"
         self.candidate = root / "b/model.mnn"
 
+    def test_missing_model_reports_path(self):
+        with self.assertRaisesRegex(FileNotFoundError, "MNN model not found") as error:
+            MnnModel(self.reference)
+        self.assertIn(str(self.reference), str(error.exception))
+
     def test_reads_tensors_independently_without_manifest(self):
         write_model(self.reference, [1, 2])
         write_model(self.candidate, [1, 2])
         self.assertTrue(compare_models(self.reference, self.candidate)["equal"])
+
+    def test_symmetric_w8_reports_reference_preparation_option(self):
+        write_quant_model(self.reference, minimum=0)
+        with self.assertRaisesRegex(ValueError, "aMin=0.*weightQuantAsymmetric=1"):
+            MnnModel(self.reference)
+
+    def test_dense_w8_payload_and_alpha_are_compared(self):
+        write_quant_model(self.reference)
+        write_quant_model(self.candidate, alpha=(-0.5, 2 / 255))
+        result = compare_models(self.reference, self.candidate)
+        self.assertTrue(result["graph_equal"])
+        self.assertEqual({t["field"] for t in result["tensors"]}, {"Weight", "Alpha"})
+        self.assertFalse(result["equal"])
+
+    def test_dense_w8_supports_int32_header_dimensions(self):
+        write_quant_model(self.reference, wide=True)
+        with MnnModel(self.reference) as model:
+            weight = next(s for s in model.slots if s.field == "Weight")
+            self.assertEqual(weight.dtype, "U8")
+            self.assertEqual(weight.quantization["group_elements"], 2)
+            self.assertEqual(
+                model.buffers[weight.file][weight.offset : weight.offset + 2],
+                b"\x00\xff",
+            )
+
+    def test_dense_w8_rejects_wrong_alpha_length(self):
+        write_quant_model(self.reference, alpha=(-1.0,))
+        with self.assertRaisesRegex(ValueError, "alpha"):
+            with MnnModel(self.reference):
+                pass
 
     def test_reports_changed_tensor_and_element(self):
         write_model(self.reference, [1, 2])

@@ -2,14 +2,16 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import onnx
 from safetensors.numpy import save_file
 
-from src.sd15.gen_template import generate
+from src.sd15.gen_template import classify, generate
+from src.sd15.mnn_tensors import MnnModel
 from src.sd15.template_values import COMPONENTS
-from tests.test_mnn_compare import write_model
+from tests.test_mnn_compare import write_model, write_quant_model
 
 
 class TemplateGenerationTest(unittest.TestCase):
@@ -43,6 +45,18 @@ class TemplateGenerationTest(unittest.TestCase):
             )
             write_model(self.mnn / (component + ".mnn"), values)
         save_file(self.weights, str(self.checkpoint))
+
+    def test_missing_model_fails_before_indexing_weights(self):
+        missing = self.mnn / "text_encoder.mnn"
+        missing.unlink()
+        with patch("src.sd15.gen_template.index_source") as index:
+            with self.assertRaisesRegex(
+                FileNotFoundError, "Template input not found"
+            ) as error:
+                generate(self.checkpoint, self.onnx, self.mnn, self.output)
+        self.assertIn(str(missing), str(error.exception))
+        index.assert_not_called()
+        self.assertFalse(self.output.exists())
 
     def test_zero_valued_learned_tensor_remains_a_parameter(self):
         generate(self.checkpoint, self.onnx, self.mnn, self.output)
@@ -84,6 +98,20 @@ class TemplateGenerationTest(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             generate(self.checkpoint, self.onnx, self.mnn, self.output)
         self.assertEqual(marker.read_text(), "keep")
+
+    def test_quantized_payload_and_alpha_share_source_mapping(self):
+        path = self.mnn / "unet.mnn"
+        write_quant_model(path)
+        provenance = {("conv", "Weight"): {"key": "weight", "shape": [1, 2, 1, 1]}}
+        with MnnModel(path) as model:
+            regions = classify(
+                model, {"weight": {}}, {}, {"weight": [1, 2]}, provenance
+            )
+        outputs = regions[path.name]
+        self.assertEqual({s["field"] for s in outputs}, {"Weight", "Alpha"})
+        self.assertTrue(all(s["kind"] == "quantized" for s in outputs))
+        self.assertTrue(all(s["key"] == "weight" for s in outputs))
+        self.assertTrue(all(s["quantization"]["algorithm"] == "hqq" for s in outputs))
 
     def test_unmapped_mnn_tensor_fails_without_leaking_mmap_views(self):
         write_model(self.mnn / "text_encoder.mnn", [9, 10])

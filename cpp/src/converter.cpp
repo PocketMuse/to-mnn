@@ -1,4 +1,5 @@
 #include "sd15/converter.hpp"
+#include "sd15/hqq.hpp"
 
 #include <algorithm>
 #include <array>
@@ -30,6 +31,8 @@ constexpr std::size_t kMaxOutputFiles = 16;
 constexpr std::size_t kMaxSegments = 65536;
 constexpr char kFormatName[] = "sd15-mnn-template";
 constexpr int kFormatVersion = 1;
+constexpr int kQuantizedFormatVersion = 2;
+constexpr char kQuantizedSegment[] = "quantized";
 constexpr char kMnnVersion[] = "3.6.1";
 constexpr char kTemplateFilename[] = "graph.bin";
 constexpr char kManifestFilename[] = "manifest.json";
@@ -96,6 +99,15 @@ public:
             return fail(error, "Failed to read at byte " + std::to_string(offset));
         }
         return true;
+    }
+
+    bool seek(uint64_t offset, std::string& error) {
+        return (offset <= static_cast<uint64_t>(std::numeric_limits<off_t>::max()) &&
+                fseeko(handle_, static_cast<off_t>(offset), SEEK_SET) == 0) || fail(error, "Failed to seek output");
+    }
+
+    bool write_at(uint64_t offset, const uint8_t* data, std::size_t size, std::string& error) {
+        return seek(offset, error) && write(data, size, error);
     }
 
     bool write(const uint8_t* data, std::size_t size, std::string& error) {
@@ -291,7 +303,8 @@ bool safe_filename(const std::string& name) {
 
 /// 출력 구간 배치와 원본 key·shape·dtype, 템플릿 참조 범위를 검증한다.
 bool validate_manifest(const Json& manifest, uint64_t template_size, const SourceIndex& source, std::string& error) {
-    if (manifest.at("format") != kFormatName || manifest.at("version") != kFormatVersion ||
+    if (manifest.at("format") != kFormatName ||
+        (manifest.at("version") != kFormatVersion && manifest.at("version") != kQuantizedFormatVersion) ||
         manifest.at("mnn_version") != kMnnVersion || manifest.at("template") != kTemplateFilename ||
         unsigned_value(manifest.at("template_size")) != template_size) {
         return fail(error, "Unsupported manifest or incorrect template size");
@@ -313,6 +326,7 @@ bool validate_manifest(const Json& manifest, uint64_t template_size, const Sourc
             return fail(error, name + ": invalid segments");
         }
         uint64_t cursor = 0;
+        std::unordered_map<std::string, std::pair<const Json*, const Json*>> quantized;
         for (const auto& segment : segments) {
             const uint64_t offset = unsigned_value(segment.at("offset"));
             const uint64_t size = unsigned_value(segment.at("size"));
@@ -331,7 +345,7 @@ bool validate_manifest(const Json& manifest, uint64_t template_size, const Sourc
                 }
                 continue;
             }
-            if (kind != "tensor") {
+            if (kind != "tensor" && kind != kQuantizedSegment) {
                 return fail(error, name + ": unknown segment kind");
             }
             const std::string key = segment.at("key");
@@ -341,6 +355,33 @@ bool validate_manifest(const Json& manifest, uint64_t template_size, const Sourc
             }
             const auto& tensor = found->second;
             const std::string dtype = segment.at("dtype");
+            if (kind == kQuantizedSegment) {
+                if (manifest.at("version") != kQuantizedFormatVersion || (tensor.dtype != "F16" && tensor.dtype != "F32") ||
+                    tensor.shape != segment.at("source_shape") || !segment.at("positive_zero").is_boolean()) {
+                    return fail(error, key + ": invalid quantized source");
+                }
+                const auto& recipe = segment.at("quantization");
+                const uint64_t area = unsigned_value(recipe.at("group_elements"));
+                const uint64_t groups = unsigned_value(recipe.at("group_count"));
+                if (recipe.at("algorithm") != "hqq" || recipe.at("bits") != kHqqBits ||
+                    recipe.at("iterations") != kHqqIterations || recipe.at("lp_norm").get<float>() != kHqqLpNorm ||
+                    recipe.at("beta").get<float>() != kHqqBeta || area == 0 || area > kMaxHqqGroupElements ||
+                    groups == 0 || tensor.elements % area != 0 || tensor.elements / area != groups) {
+                    return fail(error, key + ": unsupported HQQ recipe");
+                }
+                const std::string field = segment.at("field");
+                auto& pair = quantized[key];
+                if (field == "Weight" && dtype == "U8" && size == tensor.elements &&
+                    element_count(segment.at("shape")) == tensor.elements && pair.first == nullptr) {
+                    pair.first = &segment;
+                } else if (field == "Alpha" && dtype == "F32" && groups <= std::numeric_limits<uint64_t>::max() / kHqqAlphaBytes &&
+                           size == groups * kHqqAlphaBytes && segment.at("shape") == Json::array({groups, kHqqAlphaValues}) && pair.second == nullptr) {
+                    pair.second = &segment;
+                } else {
+                    return fail(error, key + ": invalid HQQ output");
+                }
+                continue;
+            }
             if ((dtype != "F16" && dtype != "F32") || (tensor.dtype != "F16" && tensor.dtype != "F32")) {
                 return fail(error, key + ": only F16/F32 weights are supported");
             }
@@ -354,6 +395,14 @@ bool validate_manifest(const Json& manifest, uint64_t template_size, const Sourc
         }
         if (cursor != file_size) {
             return fail(error, name + ": incomplete segments");
+        }
+        for (const auto& item : quantized) {
+            const auto* weight = item.second.first;
+            const auto* alpha = item.second.second;
+            if (weight == nullptr || alpha == nullptr || weight->at("quantization") != alpha->at("quantization") ||
+                weight->at("positive_zero") != alpha->at("positive_zero")) {
+                return fail(error, item.first + ": incomplete or inconsistent HQQ pair");
+            }
         }
     }
     return true;
@@ -436,6 +485,63 @@ bool write_tensor(
     return true;
 }
 
+/// 그룹 배치만 메모리에 올리고 payload와 alpha를 각각의 출력 위치에 기록한다.
+bool write_quantized(
+    File& source, File& output, const SourceTensor& tensor,
+    const Json& weight, const Json& alpha, std::vector<uint8_t>& input, std::string& error
+) {
+    const auto& recipe = weight.at("quantization");
+    const std::size_t area = unsigned_value(recipe.at("group_elements"));
+    const uint64_t groups = unsigned_value(recipe.at("group_count"));
+    const std::size_t width = dtype_width(tensor.dtype);
+    const std::size_t batch_groups = std::max<std::size_t>(1, input.size() / (area * width));
+    std::vector<float> values(batch_groups * area);
+    std::vector<uint8_t> payload(batch_groups * area);
+    std::vector<uint8_t> scales(batch_groups * kHqqAlphaBytes);
+    const bool positive_zero = weight.at("positive_zero");
+    for (uint64_t group = 0; group < groups; group += batch_groups) {
+        const std::size_t count = static_cast<std::size_t>(std::min<uint64_t>(groups - group, batch_groups));
+        const std::size_t elements = count * area;
+        for (std::size_t cursor = 0; cursor < elements;) {
+            const std::size_t read_count = std::min(elements - cursor, input.size() / width);
+            if (!source.read_at(tensor.offset + (group * area + cursor) * width, input.data(), read_count * width, error)) {
+                return false;
+            }
+            for (std::size_t i = 0; i < read_count; ++i) {
+                uint32_t bits = static_cast<uint32_t>(read_le(input.data() + i * width, width));
+                if (width == 2) {
+                    bits = half_to_float_bits(static_cast<uint16_t>(bits));
+                }
+                if (((bits >> kFloatExponentBits) & kFloatExponentMask) == kFloatExponentMask) {
+                    return fail(error, "Non-finite HQQ weight");
+                }
+                if (positive_zero && (bits & kFloatMagnitude) == 0) {
+                    bits = 0;
+                }
+                std::memcpy(&values[cursor + i], &bits, sizeof(bits));
+            }
+            cursor += read_count;
+        }
+        for (std::size_t i = 0; i < count; ++i) {
+            float pair[kHqqAlphaValues];
+            quantize_hqq(values.data() + i * area, area, payload.data() + i * area, pair);
+            for (std::size_t j = 0; j < kHqqAlphaValues; ++j) {
+                if (!std::isfinite(pair[j])) {
+                    return fail(error, "Non-finite HQQ scale");
+                }
+                uint32_t bits;
+                std::memcpy(&bits, &pair[j], sizeof(bits));
+                write_le(scales.data() + i * kHqqAlphaBytes + j * sizeof(float), bits, sizeof(bits));
+            }
+        }
+        if (!output.write_at(unsigned_value(weight.at("offset")) + group * area, payload.data(), elements, error) ||
+            !output.write_at(unsigned_value(alpha.at("offset")) + group * kHqqAlphaBytes, scales.data(), count * kHqqAlphaBytes, error)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /// 입력을 검증하고 literal·tensor·zero 구간을 조립한 뒤 완성 파일을 공개한다.
 bool run(const ConvertOptions& options, std::string& error) {
     if (options.chunk_bytes < 4 || options.chunk_bytes > kMaxChunkBytes || options.chunk_bytes % 4 != 0) {
@@ -483,6 +589,24 @@ bool run(const ConvertOptions& options, std::string& error) {
         }
         for (const auto& segment : file.at("segments")) {
             const std::string kind = segment.at("kind");
+            if (kind == kQuantizedSegment) {
+                if (segment.at("field") != "Weight") {
+                    continue;
+                }
+                const std::string key = segment.at("key");
+                const auto& segments = file.at("segments");
+                const auto alpha = std::find_if(segments.begin(), segments.end(), [&key](const Json& item) {
+                    return item.at("kind") == kQuantizedSegment && item.at("key") == key && item.at("field") == "Alpha";
+                });
+                if (!write_quantized(checkpoint, output, source.at(key), segment, *alpha, input, error)) {
+                    error = key + ": " + error;
+                    return false;
+                }
+                continue;
+            }
+            if (!output.seek(unsigned_value(segment.at("offset")), error)) {
+                return false;
+            }
             if (kind == "tensor") {
                 const std::string key = segment.at("key");
                 if (!write_tensor(checkpoint, output, source.at(key), segment, input, converted, error)) {

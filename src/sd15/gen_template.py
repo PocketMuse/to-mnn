@@ -84,7 +84,7 @@ def onnx_sources(path, index):
     return sources, {"inputs": inputs, "outputs": outputs}
 
 
-def classify(model, sources, index, shapes):
+def classify(model, sources, index, shapes, provenance=None):
     """MNN 구간을 원본 가중치와 0 상수로 분류하고 매핑 누락을 검사한다.
 
     고정 바이트는 분류에서 제외하며, 중복 후보와 미매핑 가중치는 거부한다.
@@ -92,6 +92,39 @@ def classify(model, sources, index, shapes):
     regions = defaultdict(list)
     covered = set()
     for slot in model.slots:
+        if slot.quantization is not None:
+            mapping = (provenance or {}).get((slot.op, "Weight"))
+            if mapping is None or mapping["shape"] != next(
+                s.shape for s in model.slots if s.op == slot.op and s.field == "Weight"
+            ):
+                raise ValueError(f"{slot.op}: missing or incompatible float provenance")
+            key = mapping["key"]
+            if key not in sources:
+                raise ValueError(f"{slot.op}: source key absent from ONNX")
+            covered.add(key)
+            regions[slot.file].append(
+                {
+                    "kind": "quantized",
+                    "offset": slot.offset,
+                    "size": slot.size,
+                    "op": slot.op,
+                    "field": slot.field,
+                    "dtype": slot.dtype,
+                    "shape": slot.shape,
+                    "key": key,
+                    "source_shape": shapes[key],
+                    "positive_zero": mapping.get("positive_zero", False),
+                    "onnx": sources[key],
+                    "quantization": slot.quantization
+                    | {
+                        "algorithm": "hqq",
+                        "iterations": 20,
+                        "lp_norm": 0.7,
+                        "beta": 10.0,
+                    },
+                }
+            )
+            continue
         buffer = model.buffers[slot.file]
         with memoryview(buffer)[slot.offset : slot.offset + slot.size] as data:
             slot_digest = digest(data)
@@ -170,11 +203,30 @@ def write_component(model, regions, template):
     return outputs
 
 
-def generate(checkpoint, onnx_dir, mnn_dir, output):
+def generate(
+    checkpoint,
+    onnx_dir,
+    mnn_dir,
+    output,
+    *,
+    unet_quantization=None,
+    reference_mnn_dir=None,
+):
     """기준 모델에서 graph.bin과 manifest.json을 새 디렉터리에 생성한다.
 
     기존 출력은 덮어쓰지 않으며 실패 시 이번 생성물만 제거한다.
     """
+    required = [checkpoint]
+    for component in COMPONENTS:
+        required.extend(
+            [onnx_dir / component / "model.onnx", mnn_dir / f"{component}.mnn"]
+        )
+    if unet_quantization is not None and reference_mnn_dir is not None:
+        required.append(reference_mnn_dir / "unet.mnn")
+    for path in required:
+        if not path.is_file():
+            raise FileNotFoundError(f"Template input not found: {path}")
+
     output.mkdir(parents=True, exist_ok=False)
     try:
         print("Indexing reference safetensors", flush=True)
@@ -193,12 +245,44 @@ def generate(checkpoint, onnx_dir, mnn_dir, output):
                     onnx_dir / component / "model.onnx", onnx_index
                 )
                 gc.collect()
+                provenance = None
+                if component == "unet" and unet_quantization is not None:
+                    if unet_quantization != "hqq-b128" or reference_mnn_dir is None:
+                        raise ValueError(
+                            "HQQ/B128 requires an FP16 reference MNN directory"
+                        )
+                    with MnnModel(reference_mnn_dir / "unet.mnn") as reference:
+                        reference_regions = classify(
+                            reference, sources, stored_index, shapes
+                        )
+                        provenance = {
+                            (s["op"], s["field"]): s
+                            for regions in reference_regions.values()
+                            for s in regions
+                            if s["kind"] == "tensor"
+                        }
+                        reference_topology = topology(reference)
                 with MnnModel(mnn_dir / f"{component}.mnn") as model:
-                    regions = classify(model, sources, stored_index, shapes)
+                    if provenance is not None:
+                        if topology(model) != reference_topology:
+                            raise ValueError(
+                                "Quantized UNet topology differs from float reference"
+                            )
+                        for slot in model.slots:
+                            if slot.field != "Weight" or slot.quantization is None:
+                                continue
+                            _, ic, ky, kx = slot.shape
+                            expected_area = (128 if ic % 128 == 0 else ic) * ky * kx
+                            if slot.quantization["group_elements"] != expected_area:
+                                raise ValueError(f"{slot.op}: not HQQ/B128 grouping")
+                    regions = classify(model, sources, stored_index, shapes, provenance)
                     manifest["files"].extend(write_component(model, regions, template))
                 manifest["components"][component] = io | {"tensor_count": len(sources)}
                 print(f"{component}: {len(sources)} tensors mapped", flush=True)
             manifest["template_size"] = template.tell()
+        if unet_quantization is not None:
+            manifest["version"] = 2
+            manifest["unet_quantization"] = unet_quantization
         (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         print(
             f"Template: {manifest['template_size']:,} bytes; saved {output}", flush=True
@@ -206,6 +290,21 @@ def generate(checkpoint, onnx_dir, mnn_dir, output):
     except Exception:
         shutil.rmtree(output)
         raise
+
+
+def topology(model):
+    """정밀도별 저장 구간을 제외하고 op 이름·연결·타입을 확인한다."""
+    net = model.net
+    return [
+        (
+            op.Name(),
+            op.Type(),
+            op.MainType(),
+            tuple(op.InputIndexes(j) for j in range(op.InputIndexesLength())),
+            tuple(op.OutputIndexes(j) for j in range(op.OutputIndexesLength())),
+        )
+        for op in (net.Oplists(i) for i in range(net.OplistsLength()))
+    ], tuple(net.TensorName(i) for i in range(net.TensorNameLength()))
 
 
 def main():
@@ -218,11 +317,20 @@ def main():
     )
     parser.add_argument("--onnx-dir", type=Path, default=Path("/artifacts/onnx"))
     parser.add_argument("--mnn-dir", type=Path, default=Path("/artifacts/mnn"))
+    parser.add_argument("--unet-quantization", choices=("hqq-b128",))
+    parser.add_argument("--reference-mnn-dir", type=Path)
     parser.add_argument(
         "--output", type=Path, default=Path("/artifacts/templates/sd15")
     )
     args = parser.parse_args()
-    generate(args.checkpoint, args.onnx_dir, args.mnn_dir, args.output)
+    generate(
+        args.checkpoint,
+        args.onnx_dir,
+        args.mnn_dir,
+        args.output,
+        unet_quantization=args.unet_quantization,
+        reference_mnn_dir=args.reference_mnn_dir,
+    )
 
 
 if __name__ == "__main__":

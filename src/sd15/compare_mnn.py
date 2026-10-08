@@ -9,7 +9,7 @@ import numpy as np
 from .mnn_tensors import MnnModel
 from .template_values import CHUNK_BYTES, COMPONENTS
 
-DTYPES = {"F16": "<f2", "F32": "<f4", "I32": "<i4", "I64": "<i8"}
+DTYPES = {"F16": "<f2", "F32": "<f4", "I32": "<i4", "I64": "<i8", "U8": "u1"}
 
 
 def compare_slot(reference, candidate, left, right):
@@ -141,7 +141,7 @@ def main():
             (f["name"].removesuffix(".weight"), s["op"], s["field"]): s["key"]
             for f in manifest["files"]
             for s in f["segments"]
-            if s["kind"] == "tensor"
+            if s["kind"] in ("tensor", "quantized")
         }
     report = {}
     for name in COMPONENTS:

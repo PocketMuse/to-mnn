@@ -16,7 +16,7 @@ struct ConvertOptions {
     std::size_t chunk_bytes = kDefaultChunkBytes;
 };
 
-/// F32/F16 safetensors와 템플릿으로 MNN 파일을 청크 단위 복원한다.
+/// F32/F16 safetensors와 템플릿으로 FP16 또는 HQQ W8 MNN을 스트리밍 복원한다.
 /// 성공 시 true, 실패 시 false와 error를 반환한다. 기존 출력은 거부한다.
 /// 완성 전 결과는 .partial에 쓰며 일반 오류 시 이번 작업 파일만 정리한다.
 bool convert(const ConvertOptions& options, std::string& error);

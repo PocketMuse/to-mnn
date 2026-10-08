@@ -118,6 +118,100 @@ class ConverterTest(unittest.TestCase):
             struct.pack("<6e", 1, 2, 3, 4, 5, 6),
         )
 
+    def configure_hqq(self, values, groups=1):
+        self.write_source(
+            "F32", struct.pack(f"<{len(values)}f", *values), [len(values)]
+        )
+        area = len(values) // groups
+        recipe = {
+            "algorithm": "hqq",
+            "bits": 8,
+            "group_elements": area,
+            "group_count": groups,
+            "iterations": 20,
+            "lp_norm": 0.7,
+            "beta": 10.0,
+        }
+        size = groups * 8 + len(values)
+        segments = [
+            {
+                "kind": "quantized",
+                "field": "Alpha",
+                "dtype": "F32",
+                "shape": [groups, 2],
+                "offset": 0,
+                "size": groups * 8,
+            },
+            {
+                "kind": "quantized",
+                "field": "Weight",
+                "dtype": "U8",
+                "shape": [len(values)],
+                "offset": groups * 8,
+                "size": len(values),
+            },
+        ]
+        for segment in segments:
+            segment.update(
+                key="weight",
+                source_shape=[len(values)],
+                positive_zero=False,
+                quantization=recipe,
+            )
+        self.manifest.update(version=2)
+        self.manifest["files"] = [
+            {"name": "test.mnn", "size": size, "segments": segments}
+        ]
+
+    def test_hqq_recreates_payload_and_scales(self):
+        self.configure_hqq([-1, 1])
+        self.run_converter()
+        data = (self.output / "test.mnn").read_bytes()
+        self.assertEqual(data[8:], b"\x00\xff")
+        minimum, scale = struct.unpack("<2f", data[:8])
+        self.assertAlmostEqual(minimum, -1, places=6)
+        self.assertAlmostEqual(scale, 2 / 255, places=8)
+
+    def test_hqq_reads_replacement_weights(self):
+        self.configure_hqq([-2, 2, -1, 1], groups=2)
+        self.run_converter()
+        data = (self.output / "test.mnn").read_bytes()
+        self.assertEqual(data[16:], b"\x00\xff\x00\xff")
+        self.assertAlmostEqual(struct.unpack("<f", data[:4])[0], -2, places=6)
+
+    def test_hqq_rejects_missing_alpha(self):
+        self.configure_hqq([-1, 1])
+        weight = self.manifest["files"][0]["segments"][1]
+        weight["offset"] = 0
+        self.manifest["files"][0].update(size=2, segments=[weight])
+        self.run_converter(False)
+
+    def test_hqq_rejects_nonfinite_source(self):
+        self.configure_hqq([-1, float("nan")])
+        self.run_converter(False)
+
+    def test_hqq_rejects_range_overflow(self):
+        self.configure_hqq([-3e38, 3e38])
+        self.assertIn("overflow", self.run_converter(False).stderr)
+
+    def test_hqq_rejects_normalization_overflow(self):
+        self.configure_hqq([3e38, 3e38])
+        self.assertIn("overflow", self.run_converter(False).stderr)
+
+    def test_hqq_accepts_float16_source(self):
+        self.configure_hqq([-1, 1])
+        self.write_source("F16", struct.pack("<2e", -1, 1), [2])
+        self.run_converter()
+        self.assertEqual((self.output / "test.mnn").read_bytes()[8:], b"\x00\xff")
+
+    def test_hqq_rejects_inconsistent_group_recipe(self):
+        self.configure_hqq([-1, 1])
+        self.manifest["files"][0]["segments"][1]["quantization"] = {
+            **self.manifest["files"][0]["segments"][1]["quantization"],
+            "group_elements": 1,
+        }
+        self.run_converter(False)
+
     def test_all_finite_half_values_expand_exactly(self):
         bits = [i for i in range(65536) if i & 0x7C00 != 0x7C00]
         data = struct.pack(f"<{len(bits)}H", *bits)
