@@ -1,4 +1,4 @@
-FROM to-mnn:export-onnx
+FROM onnx_export
 
 ARG MNN_REF=d407447ed56c4121a11ccbd266dc184ca1ead0c2
 RUN apt-get update \

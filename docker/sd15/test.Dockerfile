@@ -1,7 +1,7 @@
-FROM to-mnn:gen-template
+FROM template_generator
 
 WORKDIR /workspace
-COPY --from=to-mnn:cpp-sd15 /usr/local/bin/sd15-convert /usr/local/bin/sd15-convert
+COPY --from=converter /usr/local/bin/sd15-convert /usr/local/bin/sd15-convert
 COPY tests /workspace/tests
 ENV SD15_CONVERTER=/usr/local/bin/sd15-convert
 ENTRYPOINT ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]

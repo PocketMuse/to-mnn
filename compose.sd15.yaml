@@ -1,0 +1,99 @@
+name: to-mnn-sd15
+
+services:
+  export-onnx:
+    image: to-mnn-sd15:export-onnx
+    build:
+      context: .
+      dockerfile: docker/sd15/export-onnx.Dockerfile
+    environment:
+      HF_HOME: /artifacts/huggingface
+    volumes:
+      - ./models:/models:ro
+      - ./artifacts:/artifacts
+
+  reference-fp16:
+    image: to-mnn-sd15:export-mnn
+    build:
+      context: .
+      dockerfile: docker/sd15/export-mnn.Dockerfile
+    network_mode: none
+    volumes:
+      - ./artifacts:/artifacts
+
+  reference-w8:
+    image: to-mnn-sd15:export-mnn
+    network_mode: none
+    volumes:
+      - ./artifacts:/artifacts
+    command:
+      - --unet-quantization
+      - hqq-b128
+      - --output-dir
+      - /artifacts/quant-revalidation/w8-block128-hqq
+
+  template:
+    image: to-mnn-sd15:gen-template
+    build:
+      context: .
+      dockerfile: docker/sd15/gen-template.Dockerfile
+      additional_contexts:
+        onnx_export: service:export-onnx
+    network_mode: none
+    volumes:
+      - ./models:/models:ro
+      - ./artifacts:/artifacts
+    command:
+      - --mnn-dir
+      - /artifacts/quant-revalidation/w8-block128-hqq
+      - --reference-mnn-dir
+      - /artifacts/mnn
+      - --unet-quantization
+      - hqq-b128
+      - --output
+      - /artifacts/templates/sd15-hqq-b128-manual
+
+  convert:
+    image: to-mnn-sd15:converter
+    build:
+      context: .
+      dockerfile: docker/sd15/converter.Dockerfile
+    network_mode: none
+    mem_limit: 64m
+    memswap_limit: 64m
+    volumes:
+      - ./models:/models:ro
+      - ./artifacts:/artifacts
+    command:
+      - --checkpoint
+      - /models/v1-5-pruned-emaonly.safetensors
+      - --template-dir
+      - /artifacts/templates/sd15-hqq-b128-manual
+      - --output
+      - /artifacts/mnn-cpp-hqq-b128-manual
+
+  compare:
+    image: to-mnn-sd15:gen-template
+    network_mode: none
+    volumes:
+      - ./artifacts:/artifacts
+    entrypoint: [python, -m, src.sd15.compare_mnn]
+    command:
+      - --reference
+      - /artifacts/quant-revalidation/w8-block128-hqq
+      - --candidate
+      - /artifacts/mnn-cpp-hqq-b128-manual
+      - --manifest
+      - /artifacts/templates/sd15-hqq-b128-manual/manifest.json
+      - --report
+      - /artifacts/tensor-comparison-hqq-b128-manual.json
+
+  test:
+    image: to-mnn-sd15:test
+    build:
+      context: .
+      dockerfile: docker/sd15/test.Dockerfile
+      additional_contexts:
+        template_generator: service:template
+        converter: service:convert
+    network_mode: none
