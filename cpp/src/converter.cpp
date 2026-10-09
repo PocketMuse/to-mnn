@@ -1,8 +1,11 @@
 #include "sd15/converter.hpp"
 #include "sd15/hqq.hpp"
+#include "conversion_progress.hpp"
 
 #include <algorithm>
 #include <array>
+#include <mutex>
+#include <memory>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -55,10 +58,26 @@ constexpr uint32_t kFirstHalfSubnormalExponent = 103;
 constexpr uint32_t kMantissaShift = 13;
 constexpr uint32_t kSubnormalShiftBias = 126;
 static_assert(sizeof(off_t) >= 8, "64-bit file offsets are required");
+constexpr char kOwnershipFile[] = ".sd15-converter.json";
+std::mutex conversion_mutex;
+using namespace detail;
 
-bool fail(std::string& error, const std::string& message) {
-    error = message;
+bool fail(ConvertError& error, const std::string& message) {
+    error.message = message;
     return false;
+}
+
+void capture_exception(ConvertError& error, const std::exception& exception) noexcept {
+    if (error.code == ErrorCode::None) {
+        error.code = ErrorCode::InternalError;
+    }
+    try {
+        error.message = exception.what();
+    }
+    catch (...) {
+        error.code = ErrorCode::OutOfMemory;
+        error.message.clear();
+    }
 }
 
 uint64_t read_le(const uint8_t* bytes, std::size_t size) {
@@ -87,41 +106,63 @@ public:
         }
     }
 
-    bool open(const fs::path& path, const char* mode, std::string& error) {
+    bool open(const fs::path& path, const char* mode, ConvertError& error) {
+        path_ = path.string();
         handle_ = std::fopen(path.c_str(), mode);
+        if (handle_ == nullptr) {
+            error.code = mode[0] == 'r' ? ErrorCode::ReadFailed : ErrorCode::WriteFailed;
+            error.path = path_;
+        }
         return handle_ != nullptr || fail(error, "Cannot open " + path.string() + ": " + std::strerror(errno));
     }
 
-    bool read_at(uint64_t offset, uint8_t* data, std::size_t size, std::string& error) {
+    bool read_at(uint64_t offset, uint8_t* data, std::size_t size, ConvertError& error) {
         if (offset > static_cast<uint64_t>(std::numeric_limits<off_t>::max()) ||
             fseeko(handle_, static_cast<off_t>(offset), SEEK_SET) != 0 ||
             std::fread(data, 1, size, handle_) != size) {
+            error.code = ErrorCode::ReadFailed;
+            error.path = path_;
             return fail(error, "Failed to read at byte " + std::to_string(offset));
         }
         return true;
     }
 
-    bool seek(uint64_t offset, std::string& error) {
-        return (offset <= static_cast<uint64_t>(std::numeric_limits<off_t>::max()) &&
-                fseeko(handle_, static_cast<off_t>(offset), SEEK_SET) == 0) || fail(error, "Failed to seek output");
+    bool seek(uint64_t offset, ConvertError& error) {
+        if (offset <= static_cast<uint64_t>(std::numeric_limits<off_t>::max()) &&
+            fseeko(handle_, static_cast<off_t>(offset), SEEK_SET) == 0) {
+            return true;
+        }
+        error.code = ErrorCode::WriteFailed;
+        error.path = path_;
+        return fail(error, "Failed to seek output");
     }
 
-    bool write_at(uint64_t offset, const uint8_t* data, std::size_t size, std::string& error) {
+    bool write_at(uint64_t offset, const uint8_t* data, std::size_t size, ConvertError& error) {
         return seek(offset, error) && write(data, size, error);
     }
 
-    bool write(const uint8_t* data, std::size_t size, std::string& error) {
-        return std::fwrite(data, 1, size, handle_) == size || fail(error, "Failed to write output (check free disk space)");
+    bool write(const uint8_t* data, std::size_t size, ConvertError& error) {
+        if (std::fwrite(data, 1, size, handle_) == size) {
+            return true;
+        }
+        error.code = errno == ENOSPC ? ErrorCode::InsufficientSpace : ErrorCode::WriteFailed;
+        error.path = path_;
+        return fail(error, "Failed to write output (check free disk space)");
     }
 
-    bool finish(std::string& error) {
+    bool finish(ConvertError& error) {
         const int result = std::fclose(handle_);
         handle_ = nullptr;
+        if (result != 0) {
+            error.code = ErrorCode::WriteFailed;
+            error.path = path_;
+        }
         return result == 0 || fail(error, "Failed to close output");
     }
 
 private:
     std::FILE* handle_ = nullptr;
+    std::string path_;
 };
 
 /// 임시 출력 파일을 소유하고 성공 시 디렉터리 이름을 바꿔 공개한다.
@@ -132,17 +173,45 @@ public:
     OutputDirectory(const OutputDirectory&) = delete;
     OutputDirectory& operator=(const OutputDirectory&) = delete;
     ~OutputDirectory() {
-        if (!created_) {
-            return;
-        }
-        std::error_code ignored;
-        for (const auto& name : names_) {
-            fs::remove(path_ / name, ignored);
-        }
-        fs::remove(path_, ignored);
+        cleanup();
     }
 
-    bool create(std::string& error) {
+    bool cleanup() noexcept {
+        if (!created_) {
+            return true;
+        }
+        std::error_code error;
+        bool ok = true;
+        for (const auto& name : names_) {
+            if (name == kOwnershipFile) {
+                continue;
+            }
+            try {
+                fs::remove(path_ / name, error);
+                ok = ok && !error;
+            }
+            catch (...) {
+                ok = false;
+            }
+        }
+        if (ok) {
+            try {
+                fs::remove(path_ / kOwnershipFile, error);
+                ok = !error;
+            }
+            catch (...) {
+                ok = false;
+            }
+        }
+        if (ok) {
+            fs::remove(path_, error);
+            ok = !error;
+        }
+        created_ = !ok;
+        return ok;
+    }
+
+    bool create(ConvertError& error) {
         created_ = fs::create_directory(path_);
         return created_ || fail(error, "Staging directory already exists: " + path_.string());
     }
@@ -158,6 +227,13 @@ public:
         }
         fs::rename(path_, output);
         created_ = false;
+        try {
+            std::error_code ignored;
+            fs::remove(output / kOwnershipFile, ignored);
+        }
+        catch (...) {
+            // 공개는 완료됐다. 표식 제거 실패는 결과를 되돌리지 않는다.
+        }
     }
 
 private:
@@ -235,7 +311,7 @@ struct SourceTensor {
 using SourceIndex = std::unordered_map<std::string, SourceTensor>;
 
 /// 가중치 본문을 읽지 않고 safetensors 헤더와 데이터 범위를 검증한다.
-bool read_source(File& file, uint64_t file_size, SourceIndex& index, std::string& error) {
+bool read_source(File& file, uint64_t file_size, SourceIndex& index, ConvertError& error) {
     std::array<uint8_t, kHeaderPrefixBytes> prefix{};
     if (!file.read_at(0, prefix.data(), prefix.size(), error)) {
         return false;
@@ -297,12 +373,13 @@ bool read_source(File& file, uint64_t file_size, SourceIndex& index, std::string
 }
 
 bool safe_filename(const std::string& name) {
-    return !name.empty() && name != "." && name != ".." &&
+    return !name.empty() && name != "." && name != ".." && name != kOwnershipFile &&
            name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-") == std::string::npos;
 }
 
 /// 출력 구간 배치와 원본 key·shape·dtype, 템플릿 참조 범위를 검증한다.
-bool validate_manifest(const Json& manifest, uint64_t template_size, const SourceIndex& source, std::string& error) {
+bool validate_manifest(const Json& manifest, uint64_t template_size, const SourceIndex& source, ConvertError& error) {
+    error.code = ErrorCode::IncompatibleTemplate;
     if (manifest.at("format") != kFormatName ||
         (manifest.at("version") != kFormatVersion && manifest.at("version") != kQuantizedFormatVersion) ||
         manifest.at("mnn_version") != kMnnVersion || manifest.at("template") != kTemplateFilename ||
@@ -328,6 +405,8 @@ bool validate_manifest(const Json& manifest, uint64_t template_size, const Sourc
         uint64_t cursor = 0;
         std::unordered_map<std::string, std::pair<const Json*, const Json*>> quantized;
         for (const auto& segment : segments) {
+            error.code = ErrorCode::IncompatibleTemplate;
+            error.tensor.clear();
             const uint64_t offset = unsigned_value(segment.at("offset"));
             const uint64_t size = unsigned_value(segment.at("size"));
             const std::string kind = segment.at("kind");
@@ -349,6 +428,8 @@ bool validate_manifest(const Json& manifest, uint64_t template_size, const Sourc
                 return fail(error, name + ": unknown segment kind");
             }
             const std::string key = segment.at("key");
+            error.code = ErrorCode::TensorMismatch;
+            error.tensor = key;
             const auto found = source.find(key);
             if (found == source.end()) {
                 return fail(error, "Missing tensor: " + key);
@@ -361,6 +442,7 @@ bool validate_manifest(const Json& manifest, uint64_t template_size, const Sourc
                     return fail(error, key + ": invalid quantized source");
                 }
                 const auto& recipe = segment.at("quantization");
+                error.code = ErrorCode::IncompatibleTemplate;
                 const uint64_t area = unsigned_value(recipe.at("group_elements"));
                 const uint64_t groups = unsigned_value(recipe.at("group_count"));
                 if (recipe.at("algorithm") != "hqq" || recipe.at("bits") != kHqqBits ||
@@ -393,6 +475,8 @@ bool validate_manifest(const Json& manifest, uint64_t template_size, const Sourc
                 return fail(error, key + ": tensor shape/dtype/byte count mismatch");
             }
         }
+        error.code = ErrorCode::IncompatibleTemplate;
+        error.tensor.clear();
         if (cursor != file_size) {
             return fail(error, name + ": incomplete segments");
         }
@@ -452,13 +536,16 @@ bool write_tensor(
     const Json& segment,
     std::vector<uint8_t>& input,
     std::vector<uint8_t>& converted,
-    std::string& error
+    Progress& progress,
+    ConvertError& error
 ) {
     const std::size_t input_width = dtype_width(tensor.dtype);
     const std::size_t output_width = dtype_width(segment.at("dtype"));
     const bool positive_zero = segment.at("positive_zero");
     uint64_t cursor = 0;
     while (cursor < tensor.elements) {
+        progress.check();
+        const auto begin = Clock::now();
         const std::size_t count = static_cast<std::size_t>(std::min<uint64_t>(tensor.elements - cursor, input.size() / input_width));
         if (!source.read_at(tensor.offset + cursor * input_width, input.data(), count * input_width, error)) {
             return false;
@@ -469,6 +556,7 @@ bool write_tensor(
                 bits = half_to_float_bits(static_cast<uint16_t>(bits));
             }
             if (((bits >> kFloatExponentBits) & kFloatExponentMask) == kFloatExponentMask) {
+                error.code = ErrorCode::NonFiniteWeight;
                 return fail(error, "Non-finite weight at element " + std::to_string(cursor + i));
             }
             if (positive_zero && (bits & kFloatMagnitude) == 0) {
@@ -481,6 +569,7 @@ bool write_tensor(
             return false;
         }
         cursor += count;
+        progress.advance(WorkKind::Float, count * output_width, begin);
     }
     return true;
 }
@@ -488,7 +577,7 @@ bool write_tensor(
 /// 그룹 배치만 메모리에 올리고 payload와 alpha를 각각의 출력 위치에 기록한다.
 bool write_quantized(
     File& source, File& output, const SourceTensor& tensor,
-    const Json& weight, const Json& alpha, std::vector<uint8_t>& input, std::string& error
+    const Json& weight, const Json& alpha, std::vector<uint8_t>& input, Progress& progress, ConvertError& error
 ) {
     const auto& recipe = weight.at("quantization");
     const std::size_t area = unsigned_value(recipe.at("group_elements"));
@@ -500,9 +589,12 @@ bool write_quantized(
     std::vector<uint8_t> scales(batch_groups * kHqqAlphaBytes);
     const bool positive_zero = weight.at("positive_zero");
     for (uint64_t group = 0; group < groups; group += batch_groups) {
+        progress.check();
+        const auto begin = Clock::now();
         const std::size_t count = static_cast<std::size_t>(std::min<uint64_t>(groups - group, batch_groups));
         const std::size_t elements = count * area;
         for (std::size_t cursor = 0; cursor < elements;) {
+            progress.check();
             const std::size_t read_count = std::min(elements - cursor, input.size() / width);
             if (!source.read_at(tensor.offset + (group * area + cursor) * width, input.data(), read_count * width, error)) {
                 return false;
@@ -513,6 +605,7 @@ bool write_quantized(
                     bits = half_to_float_bits(static_cast<uint16_t>(bits));
                 }
                 if (((bits >> kFloatExponentBits) & kFloatExponentMask) == kFloatExponentMask) {
+                    error.code = ErrorCode::NonFiniteWeight;
                     return fail(error, "Non-finite HQQ weight");
                 }
                 if (positive_zero && (bits & kFloatMagnitude) == 0) {
@@ -523,6 +616,8 @@ bool write_quantized(
             cursor += read_count;
         }
         for (std::size_t i = 0; i < count; ++i) {
+            progress.check();
+            progress.emit();
             float pair[kHqqAlphaValues];
             quantize_hqq(values.data() + i * area, area, payload.data() + i * area, pair);
             for (std::size_t j = 0; j < kHqqAlphaValues; ++j) {
@@ -538,20 +633,32 @@ bool write_quantized(
             !output.write_at(unsigned_value(alpha.at("offset")) + group * kHqqAlphaBytes, scales.data(), count * kHqqAlphaBytes, error)) {
             return false;
         }
+        progress.advance(WorkKind::Hqq, elements + count * kHqqAlphaBytes, begin);
     }
     return true;
 }
 
-/// 입력을 검증하고 literal·tensor·zero 구간을 조립한 뒤 완성 파일을 공개한다.
-bool run(const ConvertOptions& options, std::string& error) {
+/// 쓰기 없이 입력과 템플릿을 검증하고 출력 계획을 만든다.
+bool prepare(const ConvertOptions& options, File& checkpoint, File& template_file,
+             SourceIndex& source, Json& manifest, InspectResult& info, ConvertError& error) {
+    error.code = ErrorCode::InvalidInput;
+    if (options.checkpoint.empty() || options.template_dir.empty() || options.output_dir.empty()) {
+        return fail(error, "Checkpoint, template and output paths are required");
+    }
     if (options.chunk_bytes < 4 || options.chunk_bytes > kMaxChunkBytes || options.chunk_bytes % 4 != 0) {
         return fail(error, "chunk-bytes must be a multiple of 4 in [4, 4194304]");
     }
     if (fs::exists(options.output_dir)) {
+        error.code = ErrorCode::OutputExists;
+        error.path = options.output_dir;
         return fail(error, "Output directory already exists: " + options.output_dir);
     }
-    File checkpoint;
-    File template_file;
+    const fs::path parent = fs::absolute(options.output_dir).parent_path();
+    if (!fs::is_directory(parent)) {
+        error.path = parent.string();
+        return fail(error, "Output parent directory must exist");
+    }
+    info.partial_exists = fs::symlink_status(options.output_dir + ".partial").type() != fs::file_type::not_found;
     File manifest_file;
     const fs::path template_dir(options.template_dir);
     if (!checkpoint.open(options.checkpoint, "rb", error) ||
@@ -559,11 +666,12 @@ bool run(const ConvertOptions& options, std::string& error) {
         !manifest_file.open(template_dir / kManifestFilename, "rb", error)) {
         return false;
     }
-    SourceIndex source;
     if (!read_source(checkpoint, fs::file_size(options.checkpoint), source, error)) {
         return false;
     }
     const uint64_t manifest_size = fs::file_size(template_dir / kManifestFilename);
+    error.code = ErrorCode::IncompatibleTemplate;
+    error.path = (template_dir / kManifestFilename).string();
     if (manifest_size == 0 || manifest_size > kMaxManifestBytes) {
         return fail(error, "Invalid or oversized manifest");
     }
@@ -571,23 +679,98 @@ bool run(const ConvertOptions& options, std::string& error) {
     if (!manifest_file.read_at(0, manifest_bytes.data(), manifest_bytes.size(), error)) {
         return false;
     }
-    const Json manifest = parse_json(manifest_bytes);
+    manifest = parse_json(manifest_bytes);
     if (!validate_manifest(manifest, fs::file_size(template_dir / kTemplateFilename), source, error)) {
         return false;
     }
+    error.path = options.checkpoint;
+    info.manifest_version = manifest.at("version");
+    info.mnn_version = manifest.at("mnn_version");
+    info.unet_quantization = manifest.value("unet_quantization", "unspecified");
+    for (const auto& file : manifest.at("files")) {
+        const uint64_t size = unsigned_value(file.at("size"));
+        if (size > UINT64_MAX - info.output_bytes) {
+            return fail(error, "Output size overflow");
+        }
+        info.files.push_back({file.at("name"), size});
+        info.output_bytes += size;
+    }
+    std::error_code space_error;
+    const auto space = fs::space(parent, space_error);
+    if (!space_error && space.available != static_cast<uintmax_t>(-1)) {
+        info.available_bytes = space.available;
+        if (space.available < info.output_bytes) {
+            error.code = ErrorCode::InsufficientSpace;
+            error.path = parent.string();
+            return fail(error, "Insufficient output disk space");
+        }
+    }
+    error = {};
+    info.ok = true;
+    return true;
+}
+
+bool run(const ConvertOptions& options, Progress& progress, OutputDirectory& staging,
+         ConvertResult& result) {
+    auto& error = result.error;
+    progress.check();
+    progress.emit(true);
+    File checkpoint;
+    File template_file;
+    SourceIndex source;
+    Json manifest;
+    InspectResult info;
+    if (!prepare(options, checkpoint, template_file, source, manifest, info, error)) {
+        return false;
+    }
+    progress.check();
+    if (info.partial_exists) {
+        error.code = ErrorCode::StaleOutput;
+        error.path = options.output_dir + ".partial";
+        return fail(error, "Staging directory already exists");
+    }
+    progress.value.total_bytes = info.output_bytes;
+    for (const auto& file : manifest.at("files")) {
+        for (const auto& segment : file.at("segments")) {
+            const std::string kind = segment.at("kind");
+            const auto work = kind == "tensor" ? WorkKind::Float :
+                (kind == kQuantizedSegment ? WorkKind::Hqq : WorkKind::Copy);
+            progress.total[static_cast<std::size_t>(work)] += unsigned_value(segment.at("size"));
+        }
+    }
+    error.code = ErrorCode::WriteFailed;
+    error.path = options.output_dir + ".partial";
     std::vector<uint8_t> input(options.chunk_bytes);
     std::vector<uint8_t> converted(options.chunk_bytes * 2);
-    OutputDirectory staging(options.output_dir + ".partial");
     if (!staging.create(error)) {
         return false;
     }
+    // 중단된 작업의 소유권과 허용 파일 목록을 먼저 기록한다.
+    Json owner = {{"format", kFormatName}, {"files", Json::array()}};
+    for (const auto& file : info.files) {
+        owner["files"].push_back(file.name);
+    }
+    File marker;
+    const std::string owner_bytes = owner.dump();
+    if (!marker.open(staging.add(kOwnershipFile), "wbx", error) ||
+        !marker.write(reinterpret_cast<const uint8_t*>(owner_bytes.data()), owner_bytes.size(), error) ||
+        !marker.finish(error)) {
+        return false;
+    }
+    progress.value.stage = ConvertStage::Converting;
     for (const auto& file : manifest.at("files")) {
         const std::string name = file.at("name");
+        progress.value.component = name.substr(0, name.find('.'));
+        progress.emit(true);
+        progress.check();
         File output;
         if (!output.open(staging.add(name), "wbx", error)) {
             return false;
         }
         for (const auto& segment : file.at("segments")) {
+            progress.check();
+            error.code = ErrorCode::InvalidInput;
+            error.tensor = segment.value("key", "");
             const std::string kind = segment.at("kind");
             if (kind == kQuantizedSegment) {
                 if (segment.at("field") != "Weight") {
@@ -598,8 +781,8 @@ bool run(const ConvertOptions& options, std::string& error) {
                 const auto alpha = std::find_if(segments.begin(), segments.end(), [&key](const Json& item) {
                     return item.at("kind") == kQuantizedSegment && item.at("key") == key && item.at("field") == "Alpha";
                 });
-                if (!write_quantized(checkpoint, output, source.at(key), segment, *alpha, input, error)) {
-                    error = key + ": " + error;
+                if (!write_quantized(checkpoint, output, source.at(key), segment, *alpha, input, progress, error)) {
+                    error.message = key + ": " + error.message;
                     return false;
                 }
                 continue;
@@ -609,8 +792,8 @@ bool run(const ConvertOptions& options, std::string& error) {
             }
             if (kind == "tensor") {
                 const std::string key = segment.at("key");
-                if (!write_tensor(checkpoint, output, source.at(key), segment, input, converted, error)) {
-                    error = key + ": " + error;
+                if (!write_tensor(checkpoint, output, source.at(key), segment, input, converted, progress, error)) {
+                    error.message = key + ": " + error.message;
                     return false;
                 }
                 continue;
@@ -622,6 +805,8 @@ bool run(const ConvertOptions& options, std::string& error) {
             const uint64_t start = kind == "literal" ? unsigned_value(segment.at("template_offset")) : 0;
             uint64_t cursor = 0;
             while (cursor < size) {
+                progress.check();
+                const auto begin = Clock::now();
                 const std::size_t count = static_cast<std::size_t>(std::min<uint64_t>(size - cursor, input.size()));
                 if (kind == "literal" && !template_file.read_at(start + cursor, input.data(), count, error)) {
                     return false;
@@ -630,27 +815,213 @@ bool run(const ConvertOptions& options, std::string& error) {
                     return false;
                 }
                 cursor += count;
+                progress.advance(WorkKind::Copy, count, begin);
             }
         }
         if (!output.finish(error)) {
             return false;
         }
     }
+    progress.value.stage = ConvertStage::Finalizing;
+    progress.emit(true);
+    progress.check();
+    error.code = ErrorCode::WriteFailed;
+    error.path = options.output_dir;
+    error.tensor.clear();
+    result.files = std::move(info.files);
     staging.publish(options.output_dir);
+    result.status = ConvertStatus::Succeeded;
+    error = {};
+    progress.value.stage = ConvertStage::Completed;
+    // 공개 이후 관찰자 오류나 취소는 성공을 되돌리지 않는다.
+    try {
+        progress.emit(true);
+    }
+    catch (...) {
+    }
     return true;
 }
 
 }  // namespace
 
-bool convert(const ConvertOptions& options, std::string& error) {
-    error.clear();
-    // JSON/파일시스템/할당 예외가 라이브러리 경계를 넘지 않게 한다.
+InspectResult inspect(const ConvertOptions& options) {
+    InspectResult result;
     try {
-        return run(options, error);
+        File checkpoint;
+        File template_file;
+        SourceIndex source;
+        Json manifest;
+        prepare(options, checkpoint, template_file, source, manifest, result, result.error);
+    }
+    catch (const std::bad_alloc&) {
+        result.error.code = ErrorCode::OutOfMemory;
+        result.error.message.clear();
     }
     catch (const std::exception& exception) {
-        return fail(error, exception.what());
+        capture_exception(result.error, exception);
     }
+    catch (...) {
+        result.error.code = ErrorCode::InternalError;
+    }
+    return result;
+}
+
+ConvertResult convert(const ConvertOptions& options, const ProgressCallback& on_progress,
+                      const CancellationToken& cancellation) {
+    ConvertResult result;
+    Progress progress{on_progress, cancellation};
+    std::unique_ptr<OutputDirectory> staging;
+    std::unique_lock<std::mutex> lock(conversion_mutex, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        result.error.code = ErrorCode::Busy;
+        return result;
+    }
+    try {
+        staging = std::make_unique<OutputDirectory>(options.output_dir + ".partial");
+        run(options, progress, *staging, result);
+    }
+    catch (const Cancelled&) {
+        result.status = ConvertStatus::Cancelled;
+        result.error = {};
+    }
+    catch (const CallbackFailed&) {
+        result.error.code = ErrorCode::CallbackFailed;
+        result.error.message.clear();
+    }
+    catch (const std::bad_alloc&) {
+        result.error.code = ErrorCode::OutOfMemory;
+        result.error.message.clear();
+    }
+    catch (const std::exception& exception) {
+        capture_exception(result.error, exception);
+    }
+    catch (...) {
+        result.error.code = ErrorCode::InternalError;
+    }
+    if (staging && !staging->cleanup()) {
+        result.status = ConvertStatus::Failed;
+        result.error.code = ErrorCode::CleanupFailed;
+    }
+    if (result.status != ConvertStatus::Succeeded) {
+        result.files.clear();
+    }
+    result.elapsed_ms = progress.elapsed();
+    return result;
+}
+
+CleanupResult cleanup_partial(const ConvertOptions& options) {
+    CleanupResult result;
+    std::unique_lock<std::mutex> lock(conversion_mutex, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        result.error.code = ErrorCode::Busy;
+        return result;
+    }
+    try {
+        result.error.code = ErrorCode::CleanupFailed;
+        if (options.output_dir.empty()) {
+            result.error.code = ErrorCode::InvalidInput;
+            return result;
+        }
+        const fs::path path(options.output_dir + ".partial");
+        result.error.path = path.string();
+        const auto type = fs::symlink_status(path).type();
+        if (type == fs::file_type::not_found) {
+            result.ok = true;
+            result.error = {};
+            return result;
+        }
+        if (type != fs::file_type::directory ||
+            fs::symlink_status(path / kOwnershipFile).type() != fs::file_type::regular) {
+            fail(result.error, "Refusing unowned staging directory");
+            return result;
+        }
+        constexpr uint64_t kMaxOwnershipBytes = 8192;
+        const auto size = fs::file_size(path / kOwnershipFile);
+        if (size == 0 || size > kMaxOwnershipBytes) {
+            fail(result.error, "Invalid ownership marker");
+            return result;
+        }
+        File marker;
+        std::vector<uint8_t> bytes(size);
+        if (!marker.open(path / kOwnershipFile, "rb", result.error) ||
+            !marker.read_at(0, bytes.data(), bytes.size(), result.error) || !marker.finish(result.error)) {
+            return result;
+        }
+        const Json owner = parse_json(bytes);
+        if (owner.at("format") != kFormatName || !owner.at("files").is_array() ||
+            owner.at("files").empty() || owner.at("files").size() > kMaxOutputFiles) {
+            fail(result.error, "Invalid ownership marker");
+            return result;
+        }
+        std::unordered_set<std::string> allowed;
+        for (const auto& item : owner.at("files")) {
+            const std::string name = item;
+            if (!safe_filename(name) || !allowed.insert(name).second) {
+                fail(result.error, "Invalid owned filename");
+                return result;
+            }
+        }
+        allowed.insert(kOwnershipFile);
+        // 모두 검증한 뒤 삭제한다. 링크·하위 폴더·알 수 없는 파일은 보존한다.
+        for (const auto& entry : fs::directory_iterator(path)) {
+            if (!allowed.count(entry.path().filename().string()) ||
+                entry.symlink_status().type() != fs::file_type::regular) {
+                fail(result.error, "Staging contains unexpected files");
+                return result;
+            }
+        }
+        for (const auto& name : allowed) {
+            if (name != kOwnershipFile) {
+                fs::remove(path / name);
+            }
+        }
+        fs::remove(path / kOwnershipFile);
+        fs::remove(path);
+        result.ok = true;
+        result.error = {};
+    }
+    catch (const std::bad_alloc&) {
+        result.error.code = ErrorCode::OutOfMemory;
+        result.error.message.clear();
+    }
+    catch (const std::exception& exception) {
+        capture_exception(result.error, exception);
+    }
+    catch (...) {
+        result.error.code = ErrorCode::CleanupFailed;
+    }
+    return result;
+}
+
+const char* error_code_name(ErrorCode code) noexcept {
+    switch (code) {
+        case ErrorCode::None: return "NONE";
+        case ErrorCode::InvalidInput: return "INVALID_INPUT";
+        case ErrorCode::IncompatibleTemplate: return "INCOMPATIBLE_TEMPLATE";
+        case ErrorCode::TensorMismatch: return "TENSOR_MISMATCH";
+        case ErrorCode::OutputExists: return "OUTPUT_EXISTS";
+        case ErrorCode::StaleOutput: return "STALE_OUTPUT";
+        case ErrorCode::Busy: return "BUSY";
+        case ErrorCode::ReadFailed: return "READ_FAILED";
+        case ErrorCode::WriteFailed: return "WRITE_FAILED";
+        case ErrorCode::InsufficientSpace: return "INSUFFICIENT_SPACE";
+        case ErrorCode::NonFiniteWeight: return "NON_FINITE_WEIGHT";
+        case ErrorCode::OutOfMemory: return "OUT_OF_MEMORY";
+        case ErrorCode::CallbackFailed: return "CALLBACK_FAILED";
+        case ErrorCode::CleanupFailed: return "CLEANUP_FAILED";
+        case ErrorCode::InternalError: return "INTERNAL_ERROR";
+    }
+    return "INTERNAL_ERROR";
+}
+
+bool convert(const ConvertOptions& options, std::string& error) {
+    const CancellationToken cancellation;
+    const auto result = convert(options, {}, cancellation);
+    error = result.error.message;
+    if (result.status != ConvertStatus::Succeeded && error.empty()) {
+        error = error_code_name(result.error.code);
+    }
+    return result.status == ConvertStatus::Succeeded;
 }
 
 }  // namespace sd15
