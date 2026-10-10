@@ -3,16 +3,15 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <stdexcept>
 
 namespace sd15 {
 
-void quantize_hqq(const float* weights, std::size_t count, uint8_t* payload, float* alpha, int iterations) {
+HqqError quantize_hqq(const float* weights, std::size_t count, uint8_t* payload, float* alpha, int iterations) noexcept {
     if (count == 0 || count > kMaxHqqGroupElements) {
-        throw std::runtime_error("Invalid HQQ group size");
+        return HqqError::InvalidGroupSize;
     }
     if (iterations < 0 || iterations > kHqqIterations) {
-        throw std::invalid_argument("HQQ iterations must be in [0, 20]");
+        return HqqError::InvalidIterations;
     }
     constexpr float kQuantRange = 255.0f;
     constexpr float kMinScale = 1e-7f;
@@ -26,13 +25,13 @@ void quantize_hqq(const float* weights, std::size_t count, uint8_t* payload, flo
     }
     const float initial_scale = std::max((maximum - minimum) * (1.0f / kQuantRange), kMinScale);
     if (!std::isfinite(initial_scale)) {
-        throw std::runtime_error("HQQ range overflow");
+        return HqqError::RangeOverflow;
     }
     const float inverse = 1.0f / initial_scale;
     const float scale = 1.0f / inverse;
     float zero = inverse * -minimum;
     if (!std::isfinite(zero) || !std::isfinite(maximum * inverse)) {
-        throw std::runtime_error("HQQ normalization overflow");
+        return HqqError::NormalizationOverflow;
     }
     // MNN 3.6.1의 기본값은 20회다. 0회는 초기값을 유지한다.
     for (int iteration = 0; iteration < iterations; ++iteration) {
@@ -50,12 +49,12 @@ void quantize_hqq(const float* weights, std::size_t count, uint8_t* payload, flo
         }
         zero = sum / static_cast<float>(count);
         if (!std::isfinite(zero)) {
-            throw std::runtime_error("HQQ zero overflow");
+            return HqqError::ZeroOverflow;
         }
     }
     minimum = -(zero * scale);
     if (!std::isfinite(minimum)) {
-        throw std::runtime_error("HQQ minimum overflow");
+        return HqqError::MinimumOverflow;
     }
     alpha[0] = minimum;
     alpha[1] = scale;
@@ -64,6 +63,21 @@ void quantize_hqq(const float* weights, std::size_t count, uint8_t* payload, flo
         const float quantized = std::clamp(std::round(value), -kQuantOffset, kQuantOffset - 1.0f);
         payload[i] = static_cast<uint8_t>(quantized + kQuantOffset);
     }
+    return HqqError::None;
+}
+
+const char* hqq_error_message(HqqError error) noexcept {
+    switch (error) {
+        case HqqError::None: return "";
+        case HqqError::InvalidGroupSize: return "Invalid HQQ group size";
+        case HqqError::InvalidIterations: return "HQQ iterations must be in [0, 20]";
+        case HqqError::RangeOverflow: return "HQQ range overflow";
+        case HqqError::NormalizationOverflow: return "HQQ normalization overflow";
+        case HqqError::ZeroOverflow: return "HQQ zero overflow";
+        case HqqError::MinimumOverflow: return "HQQ minimum overflow";
+        case HqqError::NonFiniteScale: return "Non-finite HQQ scale";
+    }
+    return "Unknown HQQ error";
 }
 
 }  // namespace sd15

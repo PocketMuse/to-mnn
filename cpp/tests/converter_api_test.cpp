@@ -124,6 +124,13 @@ int main(int argc, char** argv) {
         manifest["files"][0]["segments"][1]["source_shape"] = {2};
         save_manifest();
 
+        write(root / "template/manifest.json", "{");
+        const auto malformed = sd15::inspect(options);
+        require(malformed.error.code == sd15::ErrorCode::IncompatibleTemplate &&
+                malformed.error.path == (root / "template/manifest.json").string(), "manifest error context");
+        save_manifest();
+        require(sd15::inspect(options).ok, "previous validation error does not affect next inspection");
+
         options.output_dir = (root / "eta").string();
         auto second = manifest["files"][0];
         second["name"] = "second.mnn";
@@ -230,6 +237,17 @@ int main(int argc, char** argv) {
         const auto quantized_result = sd15::convert(options, {}, quantized_token);
         require(quantized_result.status == sd15::ConvertStatus::Succeeded && quantized_result.hqq_iterations == 0,
                 "conversion reports effective refinement count");
+        const auto successful_quantized_bytes = quantized_result.files[0].size_bytes;
+        require(successful_quantized_bytes == 10, "HQQ output includes alpha bytes");
+        options.output_dir = (root / "hqq-overflow").string();
+        std::string overflow_source = source.substr(0, 8 + header.size());
+        overflow_source.append("\xff\xff\x7f\xff\xff\xff\x7f\x7f", 8);
+        write(root / "input.safetensors", overflow_source);
+        const auto overflow = sd15::convert(options, {}, quantized_token);
+        require(overflow.status == sd15::ConvertStatus::Failed &&
+                overflow.error.code == sd15::ErrorCode::InvalidInput && overflow.error.tensor == "weight" &&
+                overflow.error.path == options.checkpoint, "HQQ error gains source context");
+        require(overflow.files.empty() && !fs::exists(root / "hqq-overflow.partial"), "HQQ error cleans output");
         std::cout << "Converter API tests passed\n";
     }
     catch (const std::exception& error) {

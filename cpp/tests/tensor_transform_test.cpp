@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 using namespace sd15::detail;
@@ -71,8 +72,25 @@ void check_hqq_storage() {
     std::array<uint8_t, sd15::kHqqAlphaBytes> alpha{};
     const std::array<uint8_t, 4> expected_payload{0, 0, 1, 255};
     const std::array<uint8_t, sd15::kHqqAlphaBytes> expected_alpha{0, 0, 0, 0, 0, 0, 0x80, 0x3f};
-    require(encode_hqq_group(input.data(), input.size(), 0, payload.data(), alpha.data()), "HQQ encoding");
+    require(encode_hqq_group(input.data(), input.size(), 0, payload.data(), alpha.data()) == sd15::HqqError::None,
+            "HQQ encoding");
     require(payload == expected_payload && alpha == expected_alpha, "HQQ storage bytes");
+}
+
+void check_hqq_errors() {
+    uint8_t payload[2]{};
+    float alpha[sd15::kHqqAlphaValues]{};
+    const float maximum = std::numeric_limits<float>::max();
+    const float range[2]{-maximum, maximum};
+    const float normalization[2]{maximum, maximum};
+    require(sd15::quantize_hqq(range, 0, payload, alpha) == sd15::HqqError::InvalidGroupSize,
+            "invalid group result");
+    require(sd15::quantize_hqq(range, 2, payload, alpha, -1) == sd15::HqqError::InvalidIterations,
+            "invalid iterations result");
+    require(sd15::quantize_hqq(range, 2, payload, alpha) == sd15::HqqError::RangeOverflow,
+            "range overflow result");
+    require(sd15::quantize_hqq(normalization, 2, payload, alpha) == sd15::HqqError::NormalizationOverflow,
+            "normalization overflow result");
 }
 
 int main() {
@@ -80,6 +98,7 @@ int main() {
         check_float_chunks();
         check_nonfinite();
         check_hqq_storage();
+        check_hqq_errors();
     }
     catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

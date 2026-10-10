@@ -1,5 +1,7 @@
 #pragma once
 
+#include "sd15/hqq.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -23,8 +25,8 @@ std::optional<std::size_t> decode_float_chunk(
     bool positive_zero, float* output);
 
 // 유한성이 검증된 한 그룹을 W8 payload와 little-endian FP32 min/scale로 변환한다.
-// 출력은 각각 count바이트와 kHqqAlphaBytes다. HQQ 범위 오류는 예외로 전달한다.
-bool encode_hqq_group(const float* input, std::size_t count, int iterations,
-                      uint8_t* payload, uint8_t* alpha);
+// 출력은 각각 count바이트와 kHqqAlphaBytes다. 실패 시 출력은 사용하지 않는다.
+HqqError encode_hqq_group(const float* input, std::size_t count, int iterations,
+                          uint8_t* payload, uint8_t* alpha) noexcept;
 
 }  // namespace sd15::detail

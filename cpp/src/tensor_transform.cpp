@@ -124,19 +124,22 @@ std::optional<std::size_t> decode_float_chunk(
     return std::nullopt;
 }
 
-bool encode_hqq_group(const float* input, std::size_t count, int iterations,
-                      uint8_t* payload, uint8_t* alpha) {
+HqqError encode_hqq_group(const float* input, std::size_t count, int iterations,
+                          uint8_t* payload, uint8_t* alpha) noexcept {
     float pair[kHqqAlphaValues];
-    quantize_hqq(input, count, payload, pair, iterations);
+    const auto error = quantize_hqq(input, count, payload, pair, iterations);
+    if (error != HqqError::None) {
+        return error;
+    }
     for (std::size_t i = 0; i < kHqqAlphaValues; ++i) {
         if (!std::isfinite(pair[i])) {
-            return false;
+            return HqqError::NonFiniteScale;
         }
         uint32_t bits;
         std::memcpy(&bits, &pair[i], sizeof(bits));
         write_le(alpha + i * sizeof(float), bits, sizeof(bits));
     }
-    return true;
+    return HqqError::None;
 }
 
 }  // namespace sd15::detail

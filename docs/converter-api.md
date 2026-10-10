@@ -11,10 +11,14 @@
 
 내부 변환 구조:
 
+* `conversion_plan`은 manifest를 검증해 복사·zero·FP 변환·HQQ 작업 목록으로 변환. HQQ Weight/Alpha 위치는 이때 함께 확정
+* 작업 목록은 메모리의 위치·설정 정보이며 파일로 저장하거나 Runtime에 전달하지 않음. JSON과 원본 텐서 인덱스는 변환 실행 전에 해제
 * `tensor_transform`은 입력 버퍼를 FP16/FP32 또는 HQQ 저장 바이트로 변환하는 함수 모음
 * 파일 I/O·취소·콜백·시간 측정은 `converter.cpp`에서 처리
 * 계산 함수는 버퍼를 할당하지 않음. 작은 임시 값은 지역 변수, 큰 버퍼는 호출자가 RAII로 소유하고 청크 간 재사용
 * 입력은 읽기 전용이며 출력과 겹치지 않음. 비유한 입력의 위치는 계산 함수가 반환하고 실행 계층에서 오류로 변환
+* 오류는 실패 지점에서 코드를 확정하고 실행 계층에서 텐서·경로를 추가. 예상 밖 예외는 API 경계에서 처리
+* `quantize_hqq`와 `encode_hqq_group`은 `HqqError`를 반환. 직접 호출 시 반환값을 확인하고 실패한 출력은 사용하지 않음. 변환 API에서는 기존 `INVALID_INPUT`으로 전달
 
 ```cpp
 sd15::ConvertOptions options;

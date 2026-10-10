@@ -209,7 +209,29 @@ class ConverterTest(unittest.TestCase):
         weight = self.manifest["files"][0]["segments"][1]
         weight["offset"] = 0
         self.manifest["files"][0].update(size=2, segments=[weight])
-        self.run_converter(False)
+        self.assertIn("INCOMPATIBLE_TEMPLATE", self.run_converter(False).stderr)
+
+    def test_hqq_weight_before_alpha_has_same_values(self):
+        self.configure_hqq([-2, 2, -1, 1], groups=2)
+        alpha, weight = self.manifest["files"][0]["segments"]
+        weight["offset"] = 0
+        alpha["offset"] = 4
+        self.manifest["files"][0]["segments"] = [weight, alpha]
+        self.run_converter()
+        data = (self.output / "test.mnn").read_bytes()
+        self.assertEqual(data[:4], b"\x00\xff\x00\xff")
+        self.assertAlmostEqual(struct.unpack("<f", data[4:8])[0], -2, places=6)
+
+    def test_manifest_missing_fields_have_explicit_error_codes(self):
+        segment = self.manifest["files"][0]["segments"][1]
+        for field, code in (
+            ("key", "INCOMPATIBLE_TEMPLATE"),
+            ("source_shape", "TENSOR_MISMATCH"),
+        ):
+            with self.subTest(field=field):
+                value = segment.pop(field)
+                self.assertIn(code, self.run_converter(False).stderr)
+                segment[field] = value
 
     def test_hqq_rejects_nonfinite_source(self):
         self.configure_hqq([-1, float("nan")])
@@ -217,7 +239,9 @@ class ConverterTest(unittest.TestCase):
 
     def test_hqq_rejects_range_overflow(self):
         self.configure_hqq([-3e38, 3e38])
-        self.assertIn("overflow", self.run_converter(False).stderr)
+        error = self.run_converter(False).stderr
+        self.assertIn("INVALID_INPUT", error)
+        self.assertIn("overflow", error)
 
     def test_hqq_rejects_normalization_overflow(self):
         self.configure_hqq([3e38, 3e38])
@@ -296,7 +320,7 @@ class ConverterTest(unittest.TestCase):
     def test_rejects_duplicate_json_keys(self):
         header = b'{"weight": {}, "weight": {"dtype":"F32","shape":[2,3],"data_offsets":[0,24]}}'
         self.checkpoint.write_bytes(struct.pack("<Q", len(header)) + header + bytes(24))
-        self.run_converter(False)
+        self.assertIn("INVALID_INPUT", self.run_converter(False).stderr)
 
 
 if __name__ == "__main__":
