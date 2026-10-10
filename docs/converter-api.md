@@ -9,6 +9,13 @@
 * MNNConvert나 MNN Runtime 없이 변환. FP16 템플릿 v1, HQQ 템플릿 v2 지원
 * 양자화 정책: [SD1.5 ADR](sd15.md)
 
+내부 변환 구조:
+
+* `tensor_transform`은 입력 버퍼를 FP16/FP32 또는 HQQ 저장 바이트로 변환하는 함수 모음
+* 파일 I/O·취소·콜백·시간 측정은 `converter.cpp`에서 처리
+* 계산 함수는 버퍼를 할당하지 않음. 작은 임시 값은 지역 변수, 큰 버퍼는 호출자가 RAII로 소유하고 청크 간 재사용
+* 입력은 읽기 전용이며 출력과 겹치지 않음. 비유한 입력의 위치는 계산 함수가 반환하고 실행 계층에서 오류로 변환
+
 ```cpp
 sd15::ConvertOptions options;
 options.checkpoint = "/app/models/model.safetensors";

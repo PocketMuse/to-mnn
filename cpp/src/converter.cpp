@@ -1,16 +1,15 @@
 #include "sd15/converter.hpp"
 #include "sd15/hqq.hpp"
 #include "conversion_progress.hpp"
+#include "tensor_transform.hpp"
 
 #include <algorithm>
 #include <array>
 #include <mutex>
 #include <memory>
 #include <cerrno>
-#include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <filesystem>
 #include <limits>
 #include <unordered_map>
@@ -40,23 +39,6 @@ constexpr char kMnnVersion[] = "3.6.1";
 constexpr char kTemplateFilename[] = "graph.bin";
 constexpr char kManifestFilename[] = "manifest.json";
 constexpr uint32_t kBitsPerByte = 8;
-constexpr uint32_t kHalfMaxFloatBits = 0x477fe000;
-constexpr uint32_t kHalfSign = 0x8000;
-constexpr uint32_t kHalfSignShift = 16;
-constexpr uint32_t kHalfMantissa = 0x3ff;
-constexpr uint32_t kHalfImplicitBit = 0x400;
-constexpr uint32_t kHalfExponentMask = 0x1f;
-constexpr uint32_t kFloatExponentMask = 0xff;
-constexpr uint32_t kFloatSign = 0x80000000;
-constexpr uint32_t kFloatMagnitude = 0x7fffffff;
-constexpr uint32_t kFloatMantissa = 0x007fffff;
-constexpr uint32_t kFloatImplicitBit = 0x00800000;
-constexpr uint32_t kFloatExponentBits = 23;
-constexpr uint32_t kHalfExponentBits = 10;
-constexpr uint32_t kExponentBiasDifference = 112;
-constexpr uint32_t kFirstHalfSubnormalExponent = 103;
-constexpr uint32_t kMantissaShift = 13;
-constexpr uint32_t kSubnormalShiftBias = 126;
 static_assert(sizeof(off_t) >= 8, "64-bit file offsets are required");
 constexpr char kOwnershipFile[] = ".sd15-converter.json";
 std::mutex conversion_mutex;
@@ -86,12 +68,6 @@ uint64_t read_le(const uint8_t* bytes, std::size_t size) {
         value |= static_cast<uint64_t>(bytes[i]) << (i * kBitsPerByte);
     }
     return value;
-}
-
-void write_le(uint8_t* bytes, uint32_t value, std::size_t size) {
-    for (std::size_t i = 0; i < size; ++i) {
-        bytes[i] = static_cast<uint8_t>(value >> (i * kBitsPerByte));
-    }
 }
 
 /// 파일 핸들을 소유하며 범위 읽기·순차 쓰기 오류를 호출자에게 전달한다.
@@ -492,42 +468,6 @@ bool validate_manifest(const Json& manifest, uint64_t template_size, const Sourc
     return true;
 }
 
-/// subnormal과 signed zero를 포함해 FP16을 FP32 비트로 확장한다.
-uint32_t half_to_float_bits(uint16_t half) {
-    const uint32_t sign = static_cast<uint32_t>(half & kHalfSign) << kHalfSignShift;
-    uint32_t exponent = (half >> kHalfExponentBits) & kHalfExponentMask;
-    uint32_t mantissa = half & kHalfMantissa;
-    if (exponent == 0 && mantissa == 0) {
-        return sign;
-    }
-    if (exponent == 0) {
-        int shift = 0;
-        while ((mantissa & kHalfImplicitBit) == 0) {
-            mantissa <<= 1;
-            ++shift;
-        }
-        exponent = kExponentBiasDifference + 1 - shift;
-        return sign | (exponent << kFloatExponentBits) | ((mantissa & kHalfMantissa) << kMantissaShift);
-    }
-    exponent = exponent == kHalfExponentMask ? kFloatExponentMask : exponent + kExponentBiasDifference;
-    return sign | (exponent << kFloatExponentBits) | (mantissa << kMantissaShift);
-}
-
-/// 유한 FP32를 MNN 규칙에 따라 범위 제한 후 0 방향으로 FP16 절삭한다.
-uint16_t float_to_half_bits(uint32_t bits) {
-    const uint16_t sign = static_cast<uint16_t>((bits & kFloatSign) >> kHalfSignShift);
-    const uint32_t magnitude = std::min(bits & kFloatMagnitude, kHalfMaxFloatBits);
-    const uint32_t exponent = magnitude >> kFloatExponentBits;
-    if (exponent < kFirstHalfSubnormalExponent) {
-        return sign;
-    }
-    if (exponent <= kExponentBiasDifference) {
-        return sign | static_cast<uint16_t>(((magnitude & kFloatMantissa) | kFloatImplicitBit) >> (kSubnormalShiftBias - exponent));
-    }
-    return sign | static_cast<uint16_t>(((exponent - kExponentBiasDifference) << kHalfExponentBits) |
-                                       ((magnitude & kFloatMantissa) >> kMantissaShift));
-}
-
 /// 전달받은 버퍼를 재사용해 텐서를 변환·기록하며 비유한 값은 거부한다.
 bool write_tensor(
     File& source,
@@ -539,8 +479,10 @@ bool write_tensor(
     Progress& progress,
     ConvertError& error
 ) {
-    const std::size_t input_width = dtype_width(tensor.dtype);
-    const std::size_t output_width = dtype_width(segment.at("dtype"));
+    const auto source_storage = tensor.dtype == "F16" ? FloatStorage::F16 : FloatStorage::F32;
+    const auto target_storage = segment.at("dtype") == "F16" ? FloatStorage::F16 : FloatStorage::F32;
+    const std::size_t input_width = storage_width(source_storage);
+    const std::size_t output_width = storage_width(target_storage);
     const bool positive_zero = segment.at("positive_zero");
     uint64_t cursor = 0;
     while (cursor < tensor.elements) {
@@ -550,20 +492,11 @@ bool write_tensor(
         if (!source.read_at(tensor.offset + cursor * input_width, input.data(), count * input_width, error)) {
             return false;
         }
-        for (std::size_t i = 0; i < count; ++i) {
-            uint32_t bits = static_cast<uint32_t>(read_le(input.data() + i * input_width, input_width));
-            if (input_width == 2) {
-                bits = half_to_float_bits(static_cast<uint16_t>(bits));
-            }
-            if (((bits >> kFloatExponentBits) & kFloatExponentMask) == kFloatExponentMask) {
-                error.code = ErrorCode::NonFiniteWeight;
-                return fail(error, "Non-finite weight at element " + std::to_string(cursor + i));
-            }
-            if (positive_zero && (bits & kFloatMagnitude) == 0) {
-                bits = 0;
-            }
-            const uint32_t value = output_width == 2 ? float_to_half_bits(bits) : bits;
-            write_le(converted.data() + i * output_width, value, output_width);
+        const auto invalid = encode_float_chunk(input.data(), count, source_storage,
+                                                target_storage, positive_zero, converted.data());
+        if (invalid) {
+            error.code = ErrorCode::NonFiniteWeight;
+            return fail(error, "Non-finite weight at element " + std::to_string(cursor + *invalid));
         }
         if (!output.write(converted.data(), count * output_width, error)) {
             return false;
@@ -583,7 +516,8 @@ bool write_quantized(
     const auto& recipe = weight.at("quantization");
     const std::size_t area = unsigned_value(recipe.at("group_elements"));
     const uint64_t groups = unsigned_value(recipe.at("group_count"));
-    const std::size_t width = dtype_width(tensor.dtype);
+    const auto source_storage = tensor.dtype == "F16" ? FloatStorage::F16 : FloatStorage::F32;
+    const std::size_t width = storage_width(source_storage);
     const std::size_t batch_groups = std::max<std::size_t>(1, input.size() / (area * width));
     std::vector<float> values(batch_groups * area);
     std::vector<uint8_t> payload(batch_groups * area);
@@ -600,19 +534,11 @@ bool write_quantized(
             if (!source.read_at(tensor.offset + (group * area + cursor) * width, input.data(), read_count * width, error)) {
                 return false;
             }
-            for (std::size_t i = 0; i < read_count; ++i) {
-                uint32_t bits = static_cast<uint32_t>(read_le(input.data() + i * width, width));
-                if (width == 2) {
-                    bits = half_to_float_bits(static_cast<uint16_t>(bits));
-                }
-                if (((bits >> kFloatExponentBits) & kFloatExponentMask) == kFloatExponentMask) {
-                    error.code = ErrorCode::NonFiniteWeight;
-                    return fail(error, "Non-finite HQQ weight");
-                }
-                if (positive_zero && (bits & kFloatMagnitude) == 0) {
-                    bits = 0;
-                }
-                std::memcpy(&values[cursor + i], &bits, sizeof(bits));
+            const auto invalid = decode_float_chunk(input.data(), read_count, source_storage,
+                                                    positive_zero, values.data() + cursor);
+            if (invalid) {
+                error.code = ErrorCode::NonFiniteWeight;
+                return fail(error, "Non-finite HQQ weight");
             }
             cursor += read_count;
         }
@@ -620,15 +546,9 @@ bool write_quantized(
         for (std::size_t i = 0; i < count; ++i) {
             progress.check();
             progress.emit();
-            float pair[kHqqAlphaValues];
-            quantize_hqq(values.data() + i * area, area, payload.data() + i * area, pair, iterations);
-            for (std::size_t j = 0; j < kHqqAlphaValues; ++j) {
-                if (!std::isfinite(pair[j])) {
-                    return fail(error, "Non-finite HQQ scale");
-                }
-                uint32_t bits;
-                std::memcpy(&bits, &pair[j], sizeof(bits));
-                write_le(scales.data() + i * kHqqAlphaBytes + j * sizeof(float), bits, sizeof(bits));
+            if (!encode_hqq_group(values.data() + i * area, area, iterations,
+                                  payload.data() + i * area, scales.data() + i * kHqqAlphaBytes)) {
+                return fail(error, "Non-finite HQQ scale");
             }
         }
         progress.hqq_compute_time += Clock::now() - compute_begin;
