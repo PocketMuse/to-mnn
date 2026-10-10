@@ -45,4 +45,4 @@ private:
     bool active_ = false;
 };
 
-}  // namespace sd15
+} // namespace sd15

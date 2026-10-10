@@ -38,19 +38,27 @@ int main(int argc, char** argv) {
     write(root / "input.safetensors", source);
     write(root / "template/graph.bin", "MNN!");
     Json manifest = {
-        {"format", "sd15-mnn-template"}, {"version", 1}, {"mnn_version", "3.6.1"},
-        {"template", "graph.bin"}, {"template_size", 4},
-        {"files", Json::array({{{"name", "test.mnn"}, {"size", 8},
-            {"segments", Json::array({
-                {{"kind", "literal"}, {"offset", 0}, {"size", 4}, {"template_offset", 0}},
-                {{"kind", "tensor"}, {"offset", 4}, {"size", 4}, {"key", "weight"},
-                 {"dtype", "F16"}, {"source_shape", {2}}, {"shape", {2}}, {"positive_zero", false}}
-            })}}})}
-    };
+        {"format", "sd15-mnn-template"},
+        {"version", 1},
+        {"mnn_version", "3.6.1"},
+        {"template", "graph.bin"},
+        {"template_size", 4},
+        {"files", Json::array({{{"name", "test.mnn"},
+                                {"size", 8},
+                                {"segments",
+                                 Json::array({{{"kind", "literal"}, {"offset", 0}, {"size", 4}, {"template_offset", 0}},
+                                              {{"kind", "tensor"},
+                                               {"offset", 4},
+                                               {"size", 4},
+                                               {"key", "weight"},
+                                               {"dtype", "F16"},
+                                               {"source_shape", {2}},
+                                               {"shape", {2}},
+                                               {"positive_zero", false}}})}}})}};
     const auto save_manifest = [&] { write(root / "template/manifest.json", manifest.dump()); };
     save_manifest();
-    sd15::ConvertOptions options{(root / "input.safetensors").string(),
-        (root / "template").string(), (root / "out").string(), 4};
+    sd15::ConvertOptions options{(root / "input.safetensors").string(), (root / "template").string(),
+                                 (root / "out").string(), 4};
     try {
         const auto info = sd15::inspect(options);
         require(info.ok && info.output_bytes == 8 && info.files.size() == 1, "inspect output plan");
@@ -73,7 +81,8 @@ int main(int argc, char** argv) {
 
         sd15::CancellationToken token;
         std::vector<sd15::ConvertProgress> events;
-        const auto result = sd15::convert(options, [&](const auto& progress) { events.push_back(progress); }, token);
+        const auto result = sd15::convert(
+            options, [&](const auto& progress) { events.push_back(progress); }, token);
         require(result.status == sd15::ConvertStatus::Succeeded, "conversion succeeds");
         require(!result.hqq_iterations && result.hqq_compute_ms == 0, "float conversion has no HQQ work");
         require(!events.empty() && events.back().stage == sd15::ConvertStage::Completed, "completion event");
@@ -91,50 +100,64 @@ int main(int argc, char** argv) {
         require(!fs::exists(root / "cancelled.partial"), "pre-cancel leaves no files");
 
         sd15::CancellationToken during;
-        const auto stopped = sd15::convert(options, [&](const auto& progress) {
-            if (progress.stage == sd15::ConvertStage::Converting) {
-                during.request_cancel();
-            }
-        }, during);
+        const auto stopped = sd15::convert(
+            options,
+            [&](const auto& progress) {
+                if (progress.stage == sd15::ConvertStage::Converting) {
+                    during.request_cancel();
+                }
+            },
+            during);
         require(stopped.status == sd15::ConvertStatus::Cancelled, "cancel from callback");
         require(!fs::exists(root / "cancelled.partial") && !fs::exists(root / "cancelled"), "cancel cleans staging");
 
         sd15::CancellationToken before_publish;
-        const auto finalized = sd15::convert(options, [&](const auto& progress) {
-            if (progress.stage == sd15::ConvertStage::Finalizing) {
-                before_publish.request_cancel();
-            }
-        }, before_publish);
+        const auto finalized = sd15::convert(
+            options,
+            [&](const auto& progress) {
+                if (progress.stage == sd15::ConvertStage::Finalizing) {
+                    before_publish.request_cancel();
+                }
+            },
+            before_publish);
         require(finalized.status == sd15::ConvertStatus::Cancelled, "cancel before publish");
-        require(!fs::exists(root / "cancelled.partial") && !fs::exists(root / "cancelled"), "completed files cleaned before publish");
+        require(!fs::exists(root / "cancelled.partial") && !fs::exists(root / "cancelled"),
+                "completed files cleaned before publish");
 
-        const auto failed_cleanup = sd15::convert(options, [&](const auto& progress) {
-            if (progress.stage == sd15::ConvertStage::Converting) {
-                write(root / "cancelled.partial/foreign", "keep");
-                throw std::runtime_error("observer failed");
-            }
-        }, token);
+        const auto failed_cleanup = sd15::convert(
+            options,
+            [&](const auto& progress) {
+                if (progress.stage == sd15::ConvertStage::Converting) {
+                    write(root / "cancelled.partial/foreign", "keep");
+                    throw std::runtime_error("observer failed");
+                }
+            },
+            token);
         require(failed_cleanup.status == sd15::ConvertStatus::Failed &&
-            failed_cleanup.error.code == sd15::ErrorCode::CleanupFailed, "cleanup failure is explicit");
+                    failed_cleanup.error.code == sd15::ErrorCode::CleanupFailed,
+                "cleanup failure is explicit");
         require(fs::exists(root / "cancelled.partial/foreign"), "cleanup failure preserves unrelated file");
         fs::remove(root / "cancelled.partial/foreign");
         fs::remove(root / "cancelled.partial");
 
         sd15::CancellationToken callback_token;
-        const auto callback_error = sd15::convert(options, [](const auto&) { throw 42; }, callback_token);
+        const auto callback_error = sd15::convert(
+            options, [](const auto&) { throw 42; }, callback_token);
         require(callback_error.error.code == sd15::ErrorCode::CallbackFailed, "callback exception contained");
 
         manifest["files"][0]["segments"][1]["source_shape"] = {1, 2};
         save_manifest();
         const auto mismatch = sd15::inspect(options);
-        require(mismatch.error.code == sd15::ErrorCode::TensorMismatch && mismatch.error.tensor == "weight", "shape error context");
+        require(mismatch.error.code == sd15::ErrorCode::TensorMismatch && mismatch.error.tensor == "weight",
+                "shape error context");
         manifest["files"][0]["segments"][1]["source_shape"] = {2};
         save_manifest();
 
         write(root / "template/manifest.json", "{");
         const auto malformed = sd15::inspect(options);
         require(malformed.error.code == sd15::ErrorCode::IncompatibleTemplate &&
-                malformed.error.path == (root / "template/manifest.json").string(), "manifest error context");
+                    malformed.error.path == (root / "template/manifest.json").string(),
+                "manifest error context");
         save_manifest();
         require(sd15::inspect(options).ok, "previous validation error does not affect next inspection");
 
@@ -145,17 +168,22 @@ int main(int argc, char** argv) {
         save_manifest();
         bool saw_estimate = false;
         sd15::CancellationToken eta_token;
-        const auto estimated = sd15::convert(options, [&](const auto& progress) {
-            if (progress.stage != sd15::ConvertStage::Completed) {
-                require(progress.fraction < 1, "100 percent only after publish");
-            }
-            if (progress.stage == sd15::ConvertStage::Converting && progress.component == "second") {
-                saw_estimate = progress.remaining_ms.has_value();
-                require(sd15::cleanup_partial(options).error.code == sd15::ErrorCode::Busy, "cannot clean active job");
-                sd15::CancellationToken nested;
-                require(sd15::convert(options, {}, nested).error.code == sd15::ErrorCode::Busy, "one conversion per process");
-            }
-        }, eta_token);
+        const auto estimated = sd15::convert(
+            options,
+            [&](const auto& progress) {
+                if (progress.stage != sd15::ConvertStage::Completed) {
+                    require(progress.fraction < 1, "100 percent only after publish");
+                }
+                if (progress.stage == sd15::ConvertStage::Converting && progress.component == "second") {
+                    saw_estimate = progress.remaining_ms.has_value();
+                    require(sd15::cleanup_partial(options).error.code == sd15::ErrorCode::Busy,
+                            "cannot clean active job");
+                    sd15::CancellationToken nested;
+                    require(sd15::convert(options, {}, nested).error.code == sd15::ErrorCode::Busy,
+                            "one conversion per process");
+                }
+            },
+            eta_token);
         require(estimated.status == sd15::ConvertStatus::Succeeded && saw_estimate, "ETA after work classes sampled");
         manifest["files"].erase(1);
         save_manifest();
@@ -169,7 +197,8 @@ int main(int argc, char** argv) {
               R"({"format":"sd15-mnn-template","files":["test.mnn"]})");
         write(root / "cancelled.partial/test.mnn", "partial");
         require(sd15::inspect(options).partial_exists, "detect stale output");
-        require(sd15::convert(options, {}, eta_token).error.code == sd15::ErrorCode::StaleOutput, "refuse stale output");
+        require(sd15::convert(options, {}, eta_token).error.code == sd15::ErrorCode::StaleOutput,
+                "refuse stale output");
         require(!sd15::cleanup_partial(options).ok, "unknown file blocks entire cleanup");
         require(fs::exists(root / "cancelled.partial/test.mnn"), "cleanup validates before deleting");
         fs::remove(root / "cancelled.partial/foreign");
@@ -177,12 +206,15 @@ int main(int argc, char** argv) {
         require(sd15::cleanup_partial(options).ok, "cleanup is idempotent");
 
         sd15::CancellationToken late;
-        const auto committed = sd15::convert(options, [&](const auto& progress) {
-            if (progress.stage == sd15::ConvertStage::Completed) {
-                late.request_cancel();
-                throw std::runtime_error("observer closed");
-            }
-        }, late);
+        const auto committed = sd15::convert(
+            options,
+            [&](const auto& progress) {
+                if (progress.stage == sd15::ConvertStage::Completed) {
+                    late.request_cancel();
+                    throw std::runtime_error("observer closed");
+                }
+            },
+            late);
         require(committed.status == sd15::ConvertStatus::Succeeded, "published result cannot be reversed");
 
         options.output_dir = (root / "job").string();
@@ -221,20 +253,24 @@ int main(int argc, char** argv) {
             std::unique_lock<std::mutex> lock(gate);
             ready.wait(lock, [&] { return service.get_conversion_status(job.job_id)->result.has_value(); });
         }
-        require(service.get_conversion_status(job.job_id)->state == sd15::JobState::Cancelled, "terminal status retained");
+        require(service.get_conversion_status(job.job_id)->state == sd15::JobState::Cancelled,
+                "terminal status retained");
         require(!fs::exists(root / "job.partial"), "job cancellation cleanup");
 
-        const Json recipe = {{"algorithm", "hqq"}, {"bits", 8}, {"iterations", 20},
-            {"lp_norm", 0.7}, {"beta", 10.0}, {"group_elements", 2}, {"group_count", 1}};
-        const Json common = {{"kind", "quantized"}, {"key", "weight"}, {"source_shape", {2}},
-            {"positive_zero", false}, {"quantization", recipe}};
+        const Json recipe = {{"algorithm", "hqq"}, {"bits", 8},           {"iterations", 20}, {"lp_norm", 0.7},
+                             {"beta", 10.0},       {"group_elements", 2}, {"group_count", 1}};
+        const Json common = {{"kind", "quantized"},
+                             {"key", "weight"},
+                             {"source_shape", {2}},
+                             {"positive_zero", false},
+                             {"quantization", recipe}};
         Json weight = common;
         weight.update({{"field", "Weight"}, {"dtype", "U8"}, {"shape", {2}}, {"offset", 8}, {"size", 2}});
         Json alpha = common;
         alpha.update({{"field", "Alpha"}, {"dtype", "F32"}, {"shape", {1, 2}}, {"offset", 0}, {"size", 8}});
         manifest["version"] = 2;
-        manifest["files"] = Json::array({{{"name", "test.mnn"}, {"size", 10},
-            {"segments", Json::array({alpha, weight})}}});
+        manifest["files"] =
+            Json::array({{{"name", "test.mnn"}, {"size", 10}, {"segments", Json::array({alpha, weight})}}});
         save_manifest();
         options.output_dir = (root / "hqq-zero").string();
         options.hqq_iterations = 0;
@@ -252,8 +288,9 @@ int main(int argc, char** argv) {
         write(root / "input.safetensors", overflow_source);
         const auto overflow = sd15::convert(options, {}, quantized_token);
         require(overflow.status == sd15::ConvertStatus::Failed &&
-                overflow.error.code == sd15::ErrorCode::InvalidInput && overflow.error.tensor == "weight" &&
-                overflow.error.path == options.checkpoint, "HQQ error gains source context");
+                    overflow.error.code == sd15::ErrorCode::InvalidInput && overflow.error.tensor == "weight" &&
+                    overflow.error.path == options.checkpoint,
+                "HQQ error gains source context");
         require(overflow.files.empty() && !fs::exists(root / "hqq-overflow.partial"), "HQQ error cleans output");
         std::cout << "Converter API tests passed\n";
     }

@@ -26,9 +26,9 @@ int main() {
                 }
                 std::vector<uint8_t> expected(values.size()), alpha(groups * kHqqAlphaBytes);
                 for (std::size_t i = 0; i < groups; ++i) {
-                    require(encode_hqq_group(values.data() + i * area, area, 20,
-                        expected.data() + i * area, alpha.data() + i * kHqqAlphaBytes) == HqqError::None,
-                        "serial reference");
+                    require(encode_hqq_group(values.data() + i * area, area, 20, expected.data() + i * area,
+                                             alpha.data() + i * kHqqAlphaBytes) == HqqError::None,
+                            "serial reference");
                 }
                 std::vector<uint8_t> payload(expected.size() + 2, 0xa5), scales(alpha.size() + 2, 0xa5);
                 CancellationToken token;
@@ -45,8 +45,9 @@ int main() {
                 require(callbacks != 0, "callback exercised during computation");
                 require(std::equal(expected.begin(), expected.end(), payload.begin() + 1), "exact payload");
                 require(std::equal(alpha.begin(), alpha.end(), scales.begin() + 1), "exact alpha");
-                require(payload.front() == 0xa5 && payload.back() == 0xa5 &&
-                        scales.front() == 0xa5 && scales.back() == 0xa5, "output bounds");
+                require(payload.front() == 0xa5 && payload.back() == 0xa5 && scales.front() == 0xa5 &&
+                            scales.back() == 0xa5,
+                        "output bounds");
 
                 // 마지막 그룹은 호출 스레드가 아닌 작업 스레드의 오류 경로를 검사한다.
                 values[values.size() - 2] = -std::numeric_limits<float>::max();

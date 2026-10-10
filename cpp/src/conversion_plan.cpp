@@ -18,17 +18,17 @@ struct HqqPair {
     std::size_t task_index = 0;
 };
 
-bool resolve_source(const Json& segment, const SourceIndex& source,
-                    ConversionTask& task, ConvertError& error) {
+bool resolve_source(const Json& segment, const SourceIndex& source, ConversionTask& task, ConvertError& error) {
     try {
         const auto found = source.find(task.tensor);
         if (found == source.end()) {
             return fail(error, ErrorCode::TensorMismatch, "Missing tensor: " + task.tensor, {}, task.tensor);
         }
         const auto& tensor = found->second;
-        if ((tensor.dtype != "F16" && tensor.dtype != "F32") ||
-            Json(tensor.shape) != segment.at("source_shape") || !segment.at("positive_zero").is_boolean()) {
-            return fail(error, ErrorCode::TensorMismatch, "Invalid tensor shape/dtype: " + task.tensor, {}, task.tensor);
+        if ((tensor.dtype != "F16" && tensor.dtype != "F32") || Json(tensor.shape) != segment.at("source_shape") ||
+            !segment.at("positive_zero").is_boolean()) {
+            return fail(error, ErrorCode::TensorMismatch, "Invalid tensor shape/dtype: " + task.tensor, {},
+                        task.tensor);
         }
         task.source_offset = tensor.offset;
         task.elements = tensor.elements;
@@ -43,8 +43,8 @@ bool resolve_source(const Json& segment, const SourceIndex& source,
         }
         task.target_storage = dtype == "F16" ? FloatStorage::F16 : FloatStorage::F32;
         const auto width = storage_width(task.target_storage);
-        if (element_count(segment.at("shape")) != tensor.elements ||
-            task.size % width != 0 || task.size / width != tensor.elements) {
+        if (element_count(segment.at("shape")) != tensor.elements || task.size % width != 0 ||
+            task.size / width != tensor.elements) {
             return fail(error, ErrorCode::TensorMismatch, "Tensor shape/dtype/byte count mismatch", {}, task.tensor);
         }
         return true;
@@ -57,16 +57,15 @@ bool resolve_source(const Json& segment, const SourceIndex& source,
     }
 }
 
-bool collect_hqq(const Json& segment, ConversionTask& task, HqqPair& pair,
-                 FilePlan& file, ConvertError& error) {
+bool collect_hqq(const Json& segment, ConversionTask& task, HqqPair& pair, FilePlan& file, ConvertError& error) {
     try {
         const auto& recipe = segment.at("quantization");
         const uint64_t area = unsigned_value(recipe.at("group_elements"));
         const uint64_t groups = unsigned_value(recipe.at("group_count"));
         if (recipe.at("algorithm") != "hqq" || recipe.at("bits") != kHqqBits ||
             recipe.at("iterations") != kHqqIterations || recipe.at("lp_norm").get<float>() != kHqqLpNorm ||
-            recipe.at("beta").get<float>() != kHqqBeta || area == 0 || area > kMaxHqqGroupElements ||
-            groups == 0 || task.elements % area != 0 || task.elements / area != groups) {
+            recipe.at("beta").get<float>() != kHqqBeta || area == 0 || area > kMaxHqqGroupElements || groups == 0 ||
+            task.elements % area != 0 || task.elements / area != groups) {
             return fail(error, ErrorCode::IncompatibleTemplate, "Unsupported HQQ recipe", {}, task.tensor);
         }
         task.group_elements = static_cast<std::size_t>(area);
@@ -96,8 +95,8 @@ bool collect_hqq(const Json& segment, ConversionTask& task, HqqPair& pair,
     }
 }
 
-bool build_file(const Json& description, uint64_t template_size, int version,
-                const SourceIndex& source, FilePlan& file, ConvertError& error) {
+bool build_file(const Json& description, uint64_t template_size, int version, const SourceIndex& source, FilePlan& file,
+                ConvertError& error) {
     file.name = description.at("name");
     file.size = unsigned_value(description.at("size"));
     if (!safe_filename(file.name) || file.size > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) {
@@ -166,15 +165,16 @@ bool build_file(const Json& description, uint64_t template_size, int version,
     return true;
 }
 
-}  // namespace
+} // namespace
 
 bool safe_filename(const std::string& name) {
     return !name.empty() && name != "." && name != ".." && name != kOwnershipFile &&
-           name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-") == std::string::npos;
+           name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-") ==
+               std::string::npos;
 }
 
-bool build_conversion_plan(const std::vector<uint8_t>& bytes, uint64_t template_size,
-                           const SourceIndex& source, ConversionPlan& plan, ConvertError& error) {
+bool build_conversion_plan(const std::vector<uint8_t>& bytes, uint64_t template_size, const SourceIndex& source,
+                           ConversionPlan& plan, ConvertError& error) {
     try {
         const Json manifest = parse_json(bytes);
         if (manifest.at("format") != kFormatName ||
@@ -218,4 +218,4 @@ bool build_conversion_plan(const std::vector<uint8_t>& bytes, uint64_t template_
     }
 }
 
-}  // namespace sd15::detail
+} // namespace sd15::detail

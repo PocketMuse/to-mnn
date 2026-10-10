@@ -6,7 +6,8 @@
 
 namespace sd15 {
 
-HqqError quantize_hqq(const float* weights, std::size_t count, uint8_t* payload, float* alpha, int iterations) noexcept {
+HqqError quantize_hqq(const float* weights, std::size_t count, uint8_t* payload, float* alpha,
+                      int iterations) noexcept {
     if (count == 0 || count > kMaxHqqGroupElements) {
         return HqqError::InvalidGroupSize;
     }
@@ -68,16 +69,24 @@ HqqError quantize_hqq(const float* weights, std::size_t count, uint8_t* payload,
 
 const char* hqq_error_message(HqqError error) noexcept {
     switch (error) {
-        case HqqError::None: return "";
-        case HqqError::InvalidGroupSize: return "Invalid HQQ group size";
-        case HqqError::InvalidIterations: return "HQQ iterations must be in [0, 20]";
-        case HqqError::RangeOverflow: return "HQQ range overflow";
-        case HqqError::NormalizationOverflow: return "HQQ normalization overflow";
-        case HqqError::ZeroOverflow: return "HQQ zero overflow";
-        case HqqError::MinimumOverflow: return "HQQ minimum overflow";
-        case HqqError::NonFiniteScale: return "Non-finite HQQ scale";
+    case HqqError::None:
+        return "";
+    case HqqError::InvalidGroupSize:
+        return "Invalid HQQ group size";
+    case HqqError::InvalidIterations:
+        return "HQQ iterations must be in [0, 20]";
+    case HqqError::RangeOverflow:
+        return "HQQ range overflow";
+    case HqqError::NormalizationOverflow:
+        return "HQQ normalization overflow";
+    case HqqError::ZeroOverflow:
+        return "HQQ zero overflow";
+    case HqqError::MinimumOverflow:
+        return "HQQ minimum overflow";
+    case HqqError::NonFiniteScale:
+        return "Non-finite HQQ scale";
     }
     return "Unknown HQQ error";
 }
 
-}  // namespace sd15
+} // namespace sd15

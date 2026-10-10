@@ -42,17 +42,20 @@ StartResult ConversionService::start_conversion(const ConvertOptions& options, C
         worker_ = std::thread([this, options, token, observer = std::move(observer)] {
             ConvertResult outcome;
             try {
-                outcome = convert(options, [&](const ConvertProgress& progress) {
-                    ConversionSnapshot current;
-                    {
-                        std::lock_guard<std::mutex> guard(mutex_);
-                        snapshot_.progress = progress;
-                        current = snapshot_;
-                    }
-                    if (observer) {
-                        observer(current);
-                    }
-                }, *token);
+                outcome = convert(
+                    options,
+                    [&](const ConvertProgress& progress) {
+                        ConversionSnapshot current;
+                        {
+                            std::lock_guard<std::mutex> guard(mutex_);
+                            snapshot_.progress = progress;
+                            current = snapshot_;
+                        }
+                        if (observer) {
+                            observer(current);
+                        }
+                    },
+                    *token);
             }
             catch (const std::bad_alloc&) {
                 outcome.error.code = ErrorCode::OutOfMemory;
@@ -63,9 +66,15 @@ StartResult ConversionService::start_conversion(const ConvertOptions& options, C
             {
                 std::lock_guard<std::mutex> guard(mutex_);
                 switch (outcome.status) {
-                    case ConvertStatus::Succeeded: snapshot_.state = JobState::Succeeded; break;
-                    case ConvertStatus::Cancelled: snapshot_.state = JobState::Cancelled; break;
-                    case ConvertStatus::Failed: snapshot_.state = JobState::Failed; break;
+                case ConvertStatus::Succeeded:
+                    snapshot_.state = JobState::Succeeded;
+                    break;
+                case ConvertStatus::Cancelled:
+                    snapshot_.state = JobState::Cancelled;
+                    break;
+                case ConvertStatus::Failed:
+                    snapshot_.state = JobState::Failed;
+                    break;
                 }
                 snapshot_.progress.elapsed_ms = outcome.elapsed_ms;
                 snapshot_.progress.remaining_ms.reset();
@@ -138,4 +147,4 @@ bool ConversionService::cancel_conversion(uint64_t job_id) {
     return true;
 }
 
-}  // namespace sd15
+} // namespace sd15

@@ -45,12 +45,14 @@ struct Progress {
     void emit(bool force = false) {
         const auto now = Clock::now();
         if (!force && std::chrono::duration_cast<std::chrono::milliseconds>(now - notified).count() <
-                static_cast<int64_t>(kProgressIntervalMs)) {
+                          static_cast<int64_t>(kProgressIntervalMs)) {
             return;
         }
         value.elapsed_ms = elapsed();
-        value.fraction = value.total_bytes == 0 ? 0 :
-            std::min(0.99, static_cast<double>(value.completed_bytes) / static_cast<double>(value.total_bytes));
+        value.fraction =
+            value.total_bytes == 0
+                ? 0
+                : std::min(0.99, static_cast<double>(value.completed_bytes) / static_cast<double>(value.total_bytes));
         value.remaining_ms.reset();
         double remaining = 0;
         bool known = value.stage == ConvertStage::Converting;
@@ -91,4 +93,4 @@ struct Progress {
     }
 };
 
-}  // namespace sd15::detail
+} // namespace sd15::detail

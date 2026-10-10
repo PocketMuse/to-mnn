@@ -52,8 +52,8 @@ HqqError HqqWorkers::compute(unsigned index, Progress* progress) {
             progress->emit();
             progress->check();
         }
-        const auto error = encode_hqq_group(batch_.values + i * batch_.area, batch_.area,
-            batch_.iterations, batch_.payload + i * batch_.area, batch_.scales + i * kHqqAlphaBytes);
+        const auto error = encode_hqq_group(batch_.values + i * batch_.area, batch_.area, batch_.iterations,
+                                            batch_.payload + i * batch_.area, batch_.scales + i * kHqqAlphaBytes);
         if (error != HqqError::None) {
             return error;
         }
@@ -125,4 +125,4 @@ HqqError HqqWorkers::run(const HqqBatch& batch, Progress& progress) {
     return HqqError::None;
 }
 
-}  // namespace sd15::detail
+} // namespace sd15::detail

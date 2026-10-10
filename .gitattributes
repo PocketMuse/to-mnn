@@ -1,0 +1,4 @@
+scripts/lint-cpp.sh text eol=lf
+cpp/include/** text eol=lf
+cpp/src/** text eol=lf
+cpp/tests/** text eol=lf

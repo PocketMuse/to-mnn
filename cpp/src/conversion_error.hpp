@@ -6,14 +6,13 @@
 
 namespace sd15::detail {
 
-inline bool fail(ConvertError& error, ErrorCode code, const std::string& message,
-                 const std::string& path = {}, const std::string& tensor = {}) {
+inline bool fail(ConvertError& error, ErrorCode code, const std::string& message, const std::string& path = {},
+                 const std::string& tensor = {}) {
     error = {code, message, path, tensor};
     return false;
 }
 
-inline void capture_exception(ConvertError& error, ErrorCode code,
-                              const std::exception& exception) noexcept {
+inline void capture_exception(ConvertError& error, ErrorCode code, const std::exception& exception) noexcept {
     try {
         error = {code, exception.what(), {}, {}};
     }
@@ -25,4 +24,4 @@ inline void capture_exception(ConvertError& error, ErrorCode code,
     }
 }
 
-}  // namespace sd15::detail
+} // namespace sd15::detail

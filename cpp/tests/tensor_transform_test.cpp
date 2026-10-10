@@ -18,35 +18,30 @@ void require(bool condition, const char* message) {
 void check_float_chunks() {
     // 1, -0, 최소 FP16 subnormal. 앞뒤 표식으로 출력 범위도 검사한다.
     const std::array<uint8_t, 6> source{0x00, 0x3c, 0x00, 0x80, 0x01, 0x00};
-    const std::array<uint8_t, 12> expected{
-        0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x33};
+    const std::array<uint8_t, 12> expected{0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x33};
     std::array<uint8_t, 14> output;
     output.fill(0xa5);
-    require(!encode_float_chunk(source.data(), 3, FloatStorage::F16, FloatStorage::F32,
-                                false, output.data() + 1), "half expansion");
+    require(!encode_float_chunk(source.data(), 3, FloatStorage::F16, FloatStorage::F32, false, output.data() + 1),
+            "half expansion");
     require(output.front() == 0xa5 && output.back() == 0xa5, "output bounds");
     for (std::size_t i = 0; i < expected.size(); ++i) {
         require(output[i + 1] == expected[i], "exact float bytes");
     }
 
     std::array<uint8_t, 6> restored{};
-    require(!encode_float_chunk(expected.data(), 3, FloatStorage::F32, FloatStorage::F16,
-                                false, restored.data()), "half encoding");
+    require(!encode_float_chunk(expected.data(), 3, FloatStorage::F32, FloatStorage::F16, false, restored.data()),
+            "half encoding");
     require(restored == source, "half round trip");
-    require(!encode_float_chunk(expected.data(), 3, FloatStorage::F32, FloatStorage::F16,
-                                true, restored.data()), "zero normalization");
+    require(!encode_float_chunk(expected.data(), 3, FloatStorage::F32, FloatStorage::F16, true, restored.data()),
+            "zero normalization");
     require(restored[3] == 0, "source negative zero normalized");
 
     std::array<float, 3> values{};
-    require(!decode_float_chunk(source.data(), 3, FloatStorage::F16, false, values.data()),
-            "decode half weights");
-    require(values[0] == 1 && std::signbit(values[1]) && values[2] == std::ldexp(1.0f, -24),
-            "decoded half values");
-    require(!decode_float_chunk(expected.data(), 3, FloatStorage::F32, true, values.data()),
-            "decode float weights");
+    require(!decode_float_chunk(source.data(), 3, FloatStorage::F16, false, values.data()), "decode half weights");
+    require(values[0] == 1 && std::signbit(values[1]) && values[2] == std::ldexp(1.0f, -24), "decoded half values");
+    require(!decode_float_chunk(expected.data(), 3, FloatStorage::F32, true, values.data()), "decode float weights");
     require(!std::signbit(values[1]), "decoded zero normalized");
-    require(!encode_float_chunk(nullptr, 0, FloatStorage::F32, FloatStorage::F16, false, nullptr),
-            "empty encoding");
+    require(!encode_float_chunk(nullptr, 0, FloatStorage::F32, FloatStorage::F16, false, nullptr), "empty encoding");
     require(!decode_float_chunk(nullptr, 0, FloatStorage::F32, false, nullptr), "empty decoding");
 }
 
@@ -59,8 +54,7 @@ void check_nonfinite() {
         const auto* input = storage == FloatStorage::F16 ? half.data() : single.data();
         require(encode_float_chunk(input, 2, storage, FloatStorage::F32, false, output.data()) == 1,
                 "encoding failure index");
-        require(decode_float_chunk(input, 2, storage, false, values.data()) == 1,
-                "decoding failure index");
+        require(decode_float_chunk(input, 2, storage, false, values.data()) == 1, "decoding failure index");
         require(decode_float_chunk(input + storage_width(storage), 1, storage, false, values.data()) == 0,
                 "first element failure");
     }
@@ -83,12 +77,10 @@ void check_hqq_errors() {
     const float maximum = std::numeric_limits<float>::max();
     const float range[2]{-maximum, maximum};
     const float normalization[2]{maximum, maximum};
-    require(sd15::quantize_hqq(range, 0, payload, alpha) == sd15::HqqError::InvalidGroupSize,
-            "invalid group result");
+    require(sd15::quantize_hqq(range, 0, payload, alpha) == sd15::HqqError::InvalidGroupSize, "invalid group result");
     require(sd15::quantize_hqq(range, 2, payload, alpha, -1) == sd15::HqqError::InvalidIterations,
             "invalid iterations result");
-    require(sd15::quantize_hqq(range, 2, payload, alpha) == sd15::HqqError::RangeOverflow,
-            "range overflow result");
+    require(sd15::quantize_hqq(range, 2, payload, alpha) == sd15::HqqError::RangeOverflow, "range overflow result");
     require(sd15::quantize_hqq(normalization, 2, payload, alpha) == sd15::HqqError::NormalizationOverflow,
             "normalization overflow result");
 }

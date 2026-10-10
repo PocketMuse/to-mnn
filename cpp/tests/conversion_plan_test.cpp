@@ -41,12 +41,13 @@ int main() {
         require(plan.output_bytes == 20 && plan.has_hqq && plan.files.size() == 1, "output metadata");
         const auto& tasks = plan.files[0].tasks;
         require(tasks.size() == 4, "alpha merged into HQQ task");
-        require(tasks[0].kind == TaskKind::Hqq && tasks[0].alpha_offset == 0 &&
-                tasks[0].output_offset == 8 && tasks[0].group_count == 1 && tasks[0].group_elements == 2,
+        require(tasks[0].kind == TaskKind::Hqq && tasks[0].alpha_offset == 0 && tasks[0].output_offset == 8 &&
+                    tasks[0].group_count == 1 && tasks[0].group_elements == 2,
                 "resolved HQQ pair");
         require(tasks[1].kind == TaskKind::Literal && tasks[2].kind == TaskKind::Zero &&
-                tasks[3].kind == TaskKind::Float && tasks[3].positive_zero &&
-                tasks[3].target_storage == FloatStorage::F16, "task order and storage");
+                    tasks[3].kind == TaskKind::Float && tasks[3].positive_zero &&
+                    tasks[3].target_storage == FloatStorage::F16,
+                "task order and storage");
 
         source.clear();
         bytes.clear();

@@ -71,10 +71,11 @@ uint16_t float_to_half_bits(uint32_t bits) {
         return sign;
     }
     if (exponent <= kExponentBiasDifference) {
-        return sign | static_cast<uint16_t>(((magnitude & kFloatMantissa) | kFloatImplicitBit) >> (kSubnormalShiftBias - exponent));
+        return sign | static_cast<uint16_t>(((magnitude & kFloatMantissa) | kFloatImplicitBit) >>
+                                            (kSubnormalShiftBias - exponent));
     }
     return sign | static_cast<uint16_t>(((exponent - kExponentBiasDifference) << kHalfExponentBits) |
-                                       ((magnitude & kFloatMantissa) >> kMantissaShift));
+                                        ((magnitude & kFloatMantissa) >> kMantissaShift));
 }
 
 // 원본 signed zero만 정규화한다. FP16 절삭으로 생기는 -0은 보존한다.
@@ -92,11 +93,10 @@ bool decode_bits(const uint8_t* input, FloatStorage storage, bool positive_zero,
     return true;
 }
 
-}  // namespace
+} // namespace
 
-std::optional<std::size_t> encode_float_chunk(
-    const uint8_t* input, std::size_t count, FloatStorage source,
-    FloatStorage target, bool positive_zero, uint8_t* output) {
+std::optional<std::size_t> encode_float_chunk(const uint8_t* input, std::size_t count, FloatStorage source,
+                                              FloatStorage target, bool positive_zero, uint8_t* output) {
     const auto input_width = storage_width(source);
     const auto output_width = storage_width(target);
     for (std::size_t i = 0; i < count; ++i) {
@@ -110,9 +110,8 @@ std::optional<std::size_t> encode_float_chunk(
     return std::nullopt;
 }
 
-std::optional<std::size_t> decode_float_chunk(
-    const uint8_t* input, std::size_t count, FloatStorage source,
-    bool positive_zero, float* output) {
+std::optional<std::size_t> decode_float_chunk(const uint8_t* input, std::size_t count, FloatStorage source,
+                                              bool positive_zero, float* output) {
     const auto width = storage_width(source);
     for (std::size_t i = 0; i < count; ++i) {
         uint32_t bits;
@@ -124,8 +123,8 @@ std::optional<std::size_t> decode_float_chunk(
     return std::nullopt;
 }
 
-HqqError encode_hqq_group(const float* input, std::size_t count, int iterations,
-                          uint8_t* payload, uint8_t* alpha) noexcept {
+HqqError encode_hqq_group(const float* input, std::size_t count, int iterations, uint8_t* payload,
+                          uint8_t* alpha) noexcept {
     float pair[kHqqAlphaValues];
     const auto error = quantize_hqq(input, count, payload, pair, iterations);
     if (error != HqqError::None) {
@@ -142,4 +141,4 @@ HqqError encode_hqq_group(const float* input, std::size_t count, int iterations,
     return HqqError::None;
 }
 
-}  // namespace sd15::detail
+} // namespace sd15::detail

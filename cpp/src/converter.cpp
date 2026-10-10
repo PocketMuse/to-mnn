@@ -65,8 +65,7 @@ public:
 
     bool read_at(uint64_t offset, uint8_t* data, std::size_t size, ConvertError& error) {
         if (offset > static_cast<uint64_t>(std::numeric_limits<off_t>::max()) ||
-            fseeko(handle_, static_cast<off_t>(offset), SEEK_SET) != 0 ||
-            std::fread(data, 1, size, handle_) != size) {
+            fseeko(handle_, static_cast<off_t>(offset), SEEK_SET) != 0 || std::fread(data, 1, size, handle_) != size) {
             return fail(error, ErrorCode::ReadFailed, "Failed to read at byte " + std::to_string(offset), path_);
         }
         return true;
@@ -110,9 +109,7 @@ public:
     explicit OutputDirectory(fs::path path) : path_(std::move(path)) {}
     OutputDirectory(const OutputDirectory&) = delete;
     OutputDirectory& operator=(const OutputDirectory&) = delete;
-    ~OutputDirectory() {
-        cleanup();
-    }
+    ~OutputDirectory() { cleanup(); }
 
     bool cleanup() noexcept {
         if (!created_) {
@@ -152,8 +149,8 @@ public:
     bool create(ConvertError& error) {
         std::error_code ec;
         created_ = fs::create_directory(path_, ec);
-        return created_ || fail(error, ErrorCode::WriteFailed,
-                               ec ? ec.message() : "Staging directory already exists", path_.string());
+        return created_ || fail(error, ErrorCode::WriteFailed, ec ? ec.message() : "Staging directory already exists",
+                                path_.string());
     }
 
     fs::path add(const std::string& name) {
@@ -165,8 +162,8 @@ public:
         std::error_code ec;
         const bool exists = fs::exists(output, ec);
         if (ec || exists) {
-            return fail(error, ErrorCode::WriteFailed,
-                        ec ? ec.message() : "Output directory already exists", output.string());
+            return fail(error, ErrorCode::WriteFailed, ec ? ec.message() : "Output directory already exists",
+                        output.string());
         }
         fs::rename(path_, output, ec);
         if (ec) {
@@ -197,8 +194,8 @@ bool read_source(File& file, uint64_t file_size, SourceIndex& index, ConvertErro
             return false;
         }
         const uint64_t header_size = read_le(prefix.data(), prefix.size());
-        if (header_size == 0 || header_size > kMaxHeaderBytes ||
-            file_size < kHeaderPrefixBytes || header_size > file_size - kHeaderPrefixBytes) {
+        if (header_size == 0 || header_size > kMaxHeaderBytes || file_size < kHeaderPrefixBytes ||
+            header_size > file_size - kHeaderPrefixBytes) {
             return fail(error, ErrorCode::InvalidInput, "Invalid or oversized safetensors header");
         }
         std::vector<uint8_t> bytes(static_cast<std::size_t>(header_size));
@@ -239,7 +236,8 @@ bool read_source(File& file, uint64_t file_size, SourceIndex& index, ConvertErro
                 return fail(error, ErrorCode::InvalidInput, it.key() + ": invalid shape or data range");
             }
             intervals.emplace_back(begin, end);
-            index.emplace(it.key(), SourceTensor{data_start + begin, count, dtype, tensor.at("shape").get<std::vector<uint64_t>>()});
+            index.emplace(it.key(), SourceTensor{data_start + begin, count, dtype,
+                                                 tensor.at("shape").get<std::vector<uint64_t>>()});
         }
         std::sort(intervals.begin(), intervals.end());
         uint64_t cursor = 0;
@@ -260,29 +258,24 @@ bool read_source(File& file, uint64_t file_size, SourceIndex& index, ConvertErro
 }
 
 /// 전달받은 버퍼를 재사용해 텐서를 변환·기록하며 비유한 값은 거부한다.
-bool write_tensor(
-    File& source,
-    File& output,
-    const ConversionTask& task,
-    std::vector<uint8_t>& input,
-    std::vector<uint8_t>& converted,
-    Progress& progress,
-    ConvertError& error
-) {
+bool write_tensor(File& source, File& output, const ConversionTask& task, std::vector<uint8_t>& input,
+                  std::vector<uint8_t>& converted, Progress& progress, ConvertError& error) {
     const std::size_t input_width = storage_width(task.source_storage);
     const std::size_t output_width = storage_width(task.target_storage);
     uint64_t cursor = 0;
     while (cursor < task.elements) {
         progress.check();
         const auto begin = Clock::now();
-        const std::size_t count = static_cast<std::size_t>(std::min<uint64_t>(task.elements - cursor, input.size() / input_width));
+        const std::size_t count =
+            static_cast<std::size_t>(std::min<uint64_t>(task.elements - cursor, input.size() / input_width));
         if (!source.read_at(task.source_offset + cursor * input_width, input.data(), count * input_width, error)) {
             return false;
         }
-        const auto invalid = encode_float_chunk(input.data(), count, task.source_storage,
-                                                task.target_storage, task.positive_zero, converted.data());
+        const auto invalid = encode_float_chunk(input.data(), count, task.source_storage, task.target_storage,
+                                                task.positive_zero, converted.data());
         if (invalid) {
-            return fail(error, ErrorCode::NonFiniteWeight, "Non-finite weight at element " + std::to_string(cursor + *invalid));
+            return fail(error, ErrorCode::NonFiniteWeight,
+                        "Non-finite weight at element " + std::to_string(cursor + *invalid));
         }
         if (!output.write(converted.data(), count * output_width, error)) {
             return false;
@@ -294,11 +287,8 @@ bool write_tensor(
 }
 
 /// 그룹 배치만 메모리에 올리고 payload와 alpha를 각각의 출력 위치에 기록한다.
-bool write_quantized(
-    File& source, File& output, const ConversionTask& task,
-    std::vector<uint8_t>& input, int iterations, HqqWorkers& workers,
-    Progress& progress, ConvertError& error
-) {
+bool write_quantized(File& source, File& output, const ConversionTask& task, std::vector<uint8_t>& input,
+                     int iterations, HqqWorkers& workers, Progress& progress, ConvertError& error) {
     const std::size_t area = task.group_elements;
     const uint64_t groups = task.group_count;
     const std::size_t width = storage_width(task.source_storage);
@@ -314,25 +304,27 @@ bool write_quantized(
         for (std::size_t cursor = 0; cursor < elements;) {
             progress.check();
             const std::size_t read_count = std::min(elements - cursor, input.size() / width);
-            if (!source.read_at(task.source_offset + (group * area + cursor) * width, input.data(), read_count * width, error)) {
+            if (!source.read_at(task.source_offset + (group * area + cursor) * width, input.data(), read_count * width,
+                                error)) {
                 return false;
             }
-            const auto invalid = decode_float_chunk(input.data(), read_count, task.source_storage,
-                                                    task.positive_zero, values.data() + cursor);
+            const auto invalid = decode_float_chunk(input.data(), read_count, task.source_storage, task.positive_zero,
+                                                    values.data() + cursor);
             if (invalid) {
                 return fail(error, ErrorCode::NonFiniteWeight, "Non-finite HQQ weight");
             }
             cursor += read_count;
         }
         const auto compute_begin = Clock::now();
-        const auto hqq_error = workers.run(
-            {values.data(), payload.data(), scales.data(), count, area, iterations}, progress);
+        const auto hqq_error =
+            workers.run({values.data(), payload.data(), scales.data(), count, area, iterations}, progress);
         if (hqq_error != HqqError::None) {
             return fail(error, ErrorCode::InvalidInput, hqq_error_message(hqq_error));
         }
         progress.hqq_compute_time += Clock::now() - compute_begin;
         if (!output.write_at(task.output_offset + group * area, payload.data(), elements, error) ||
-            !output.write_at(task.alpha_offset + group * kHqqAlphaBytes, scales.data(), count * kHqqAlphaBytes, error)) {
+            !output.write_at(task.alpha_offset + group * kHqqAlphaBytes, scales.data(), count * kHqqAlphaBytes,
+                             error)) {
             return false;
         }
         progress.advance(WorkKind::Hqq, elements + count * kHqqAlphaBytes, begin);
@@ -341,8 +333,8 @@ bool write_quantized(
 }
 
 /// 쓰기 없이 입력과 템플릿을 검증하고 출력 계획을 만든다.
-bool prepare(const ConvertOptions& options, File& checkpoint, File& template_file,
-             ConversionPlan& plan, InspectResult& info, ConvertError& error) {
+bool prepare(const ConvertOptions& options, File& checkpoint, File& template_file, ConversionPlan& plan,
+             InspectResult& info, ConvertError& error) {
     try {
         if (options.thread_count < 1 || options.thread_count > kMaxThreadCount) {
             return fail(error, ErrorCode::InvalidInput, "Thread count must be in [1, 8]");
@@ -387,7 +379,8 @@ bool prepare(const ConvertOptions& options, File& checkpoint, File& template_fil
             return fail(error, ErrorCode::ReadFailed, ec.message(), manifest_path.string());
         }
         if (manifest_size == 0 || manifest_size > kMaxManifestBytes) {
-            return fail(error, ErrorCode::IncompatibleTemplate, "Invalid or oversized manifest", manifest_path.string());
+            return fail(error, ErrorCode::IncompatibleTemplate, "Invalid or oversized manifest",
+                        manifest_path.string());
         }
         const auto template_size = fs::file_size(template_dir / kTemplateFilename, ec);
         if (ec) {
@@ -429,9 +422,8 @@ bool prepare(const ConvertOptions& options, File& checkpoint, File& template_fil
     }
 }
 
-bool write_task(File& checkpoint, File& template_file, File& output,
-                const ConversionTask& task, std::vector<uint8_t>& input,
-                std::vector<uint8_t>& converted, int iterations, HqqWorkers& workers,
+bool write_task(File& checkpoint, File& template_file, File& output, const ConversionTask& task,
+                std::vector<uint8_t>& input, std::vector<uint8_t>& converted, int iterations, HqqWorkers& workers,
                 Progress& progress, ConvertError& error) {
     if (task.kind == TaskKind::Hqq) {
         return write_quantized(checkpoint, output, task, input, iterations, workers, progress, error);
@@ -471,12 +463,10 @@ bool write_owner(OutputDirectory& staging, const ConversionPlan& plan, ConvertEr
     File marker;
     const std::string bytes = owner.dump();
     return marker.open(staging.add(kOwnershipFile), "wbx", error) &&
-           marker.write(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size(), error) &&
-           marker.finish(error);
+           marker.write(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size(), error) && marker.finish(error);
 }
 
-void run(const ConvertOptions& options, Progress& progress, OutputDirectory& staging,
-         ConvertResult& result) {
+void run(const ConvertOptions& options, Progress& progress, OutputDirectory& staging, ConvertResult& result) {
     auto& error = result.error;
     progress.check();
     progress.emit(true);
@@ -496,10 +486,10 @@ void run(const ConvertOptions& options, Progress& progress, OutputDirectory& sta
     result.hqq_iterations = info.hqq_iterations;
     for (const auto& file : plan.files) {
         for (const auto& task : file.tasks) {
-            const auto work = task.kind == TaskKind::Float ? WorkKind::Float :
-                (task.kind == TaskKind::Hqq ? WorkKind::Hqq : WorkKind::Copy);
-            const uint64_t bytes = task.size +
-                (task.kind == TaskKind::Hqq ? task.group_count * kHqqAlphaBytes : 0);
+            const auto work = task.kind == TaskKind::Float
+                                  ? WorkKind::Float
+                                  : (task.kind == TaskKind::Hqq ? WorkKind::Hqq : WorkKind::Copy);
+            const uint64_t bytes = task.size + (task.kind == TaskKind::Hqq ? task.group_count * kHqqAlphaBytes : 0);
             progress.total[static_cast<std::size_t>(work)] += bytes;
         }
     }
@@ -520,8 +510,8 @@ void run(const ConvertOptions& options, Progress& progress, OutputDirectory& sta
         }
         for (const auto& task : file.tasks) {
             progress.check();
-            if (!write_task(checkpoint, template_file, output, task, input, converted,
-                            options.hqq_iterations, workers, progress, error)) {
+            if (!write_task(checkpoint, template_file, output, task, input, converted, options.hqq_iterations, workers,
+                            progress, error)) {
                 error.tensor = task.tensor;
                 if (!task.tensor.empty()) {
                     if (error.path.empty()) {
@@ -553,7 +543,7 @@ void run(const ConvertOptions& options, Progress& progress, OutputDirectory& sta
     }
 }
 
-}  // namespace
+} // namespace
 
 InspectResult inspect(const ConvertOptions& options) {
     InspectResult result;
@@ -657,8 +647,8 @@ CleanupResult cleanup_partial(const ConvertOptions& options) {
             return result;
         }
         const Json owner = parse_json(bytes);
-        if (owner.at("format") != kFormatName || !owner.at("files").is_array() ||
-            owner.at("files").empty() || owner.at("files").size() > kMaxOutputFiles) {
+        if (owner.at("format") != kFormatName || !owner.at("files").is_array() || owner.at("files").empty() ||
+            owner.at("files").size() > kMaxOutputFiles) {
             fail(result.error, ErrorCode::CleanupFailed, "Invalid ownership marker", path.string());
             return result;
         }
@@ -704,21 +694,36 @@ CleanupResult cleanup_partial(const ConvertOptions& options) {
 
 const char* error_code_name(ErrorCode code) noexcept {
     switch (code) {
-        case ErrorCode::None: return "NONE";
-        case ErrorCode::InvalidInput: return "INVALID_INPUT";
-        case ErrorCode::IncompatibleTemplate: return "INCOMPATIBLE_TEMPLATE";
-        case ErrorCode::TensorMismatch: return "TENSOR_MISMATCH";
-        case ErrorCode::OutputExists: return "OUTPUT_EXISTS";
-        case ErrorCode::StaleOutput: return "STALE_OUTPUT";
-        case ErrorCode::Busy: return "BUSY";
-        case ErrorCode::ReadFailed: return "READ_FAILED";
-        case ErrorCode::WriteFailed: return "WRITE_FAILED";
-        case ErrorCode::InsufficientSpace: return "INSUFFICIENT_SPACE";
-        case ErrorCode::NonFiniteWeight: return "NON_FINITE_WEIGHT";
-        case ErrorCode::OutOfMemory: return "OUT_OF_MEMORY";
-        case ErrorCode::CallbackFailed: return "CALLBACK_FAILED";
-        case ErrorCode::CleanupFailed: return "CLEANUP_FAILED";
-        case ErrorCode::InternalError: return "INTERNAL_ERROR";
+    case ErrorCode::None:
+        return "NONE";
+    case ErrorCode::InvalidInput:
+        return "INVALID_INPUT";
+    case ErrorCode::IncompatibleTemplate:
+        return "INCOMPATIBLE_TEMPLATE";
+    case ErrorCode::TensorMismatch:
+        return "TENSOR_MISMATCH";
+    case ErrorCode::OutputExists:
+        return "OUTPUT_EXISTS";
+    case ErrorCode::StaleOutput:
+        return "STALE_OUTPUT";
+    case ErrorCode::Busy:
+        return "BUSY";
+    case ErrorCode::ReadFailed:
+        return "READ_FAILED";
+    case ErrorCode::WriteFailed:
+        return "WRITE_FAILED";
+    case ErrorCode::InsufficientSpace:
+        return "INSUFFICIENT_SPACE";
+    case ErrorCode::NonFiniteWeight:
+        return "NON_FINITE_WEIGHT";
+    case ErrorCode::OutOfMemory:
+        return "OUT_OF_MEMORY";
+    case ErrorCode::CallbackFailed:
+        return "CALLBACK_FAILED";
+    case ErrorCode::CleanupFailed:
+        return "CLEANUP_FAILED";
+    case ErrorCode::InternalError:
+        return "INTERNAL_ERROR";
     }
     return "INTERNAL_ERROR";
 }
@@ -733,4 +738,4 @@ bool convert(const ConvertOptions& options, std::string& error) {
     return result.status == ConvertStatus::Succeeded;
 }
 
-}  // namespace sd15
+} // namespace sd15

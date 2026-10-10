@@ -55,7 +55,7 @@ struct ConversionPlan {
 
 bool safe_filename(const std::string& name);
 // 실패 시 plan을 공개하지 않는다. JSON은 함수 반환 전에 해제된다.
-bool build_conversion_plan(const std::vector<uint8_t>& bytes, uint64_t template_size,
-                           const SourceIndex& source, ConversionPlan& plan, ConvertError& error);
+bool build_conversion_plan(const std::vector<uint8_t>& bytes, uint64_t template_size, const SourceIndex& source,
+                           ConversionPlan& plan, ConvertError& error);
 
-}  // namespace sd15::detail
+} // namespace sd15::detail

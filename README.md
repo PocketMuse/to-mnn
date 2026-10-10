@@ -142,6 +142,27 @@ docker compose -f compose.sd15.yaml run --rm test
 
 ## 코드 검사 및 포맷
 
+### C++
+
+```bash
+# 도구 이미지 빌드
+docker build -f docker/lint.Dockerfile -t to-mnn:lint .
+
+# 포맷 검사
+MSYS_NO_PATHCONV=1 docker run --rm --network none \
+  --mount "type=bind,source=$(pwd -W),target=/workspace,readonly" to-mnn:lint format-check
+
+# 정적 분석
+MSYS_NO_PATHCONV=1 docker run --rm --network none \
+  --mount "type=bind,source=$(pwd -W),target=/workspace,readonly" to-mnn:lint tidy
+
+# 포맷 자동 적용
+MSYS_NO_PATHCONV=1 docker run --rm --network none \
+  --mount "type=bind,source=$(pwd -W),target=/workspace" to-mnn:lint format
+```
+
+### Python
+
 ```bash
 uv run --locked --only-dev ruff check .
 uv run --locked --only-dev ruff format --check .

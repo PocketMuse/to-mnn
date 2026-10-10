@@ -1,0 +1,17 @@
+Checks: >-
+  -*,
+  clang-analyzer-*,
+  bugprone-dangling-handle,
+  bugprone-integer-division,
+  bugprone-sizeof-expression,
+  bugprone-suspicious-memory-comparison,
+  bugprone-use-after-move,
+  performance-for-range-copy,
+  performance-unnecessary-copy-initialization,
+  readability-braces-around-statements
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(^|/)cpp/(include|src|tests)/'
+FormatStyle: file
+CheckOptions:
+  - key: readability-braces-around-statements.ShortStatementLines
+    value: '0'

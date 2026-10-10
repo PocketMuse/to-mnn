@@ -47,4 +47,4 @@ private:
     const CancellationToken* cancellation_ = nullptr;
 };
 
-}  // namespace sd15::detail
+} // namespace sd15::detail

@@ -28,7 +28,8 @@ inline Json parse_json(const std::vector<uint8_t>& bytes) {
             if (!keys.back().insert(value.get<std::string>()).second) {
                 throw std::runtime_error("Duplicate JSON key: " + value.get<std::string>());
             }
-        } else if (event == Json::parse_event_t::object_end) {
+        }
+        else if (event == Json::parse_event_t::object_end) {
             keys.pop_back();
         }
         return true;
@@ -73,4 +74,4 @@ inline std::size_t dtype_width(const std::string& dtype) {
     throw std::runtime_error("Unsupported dtype: " + dtype);
 }
 
-}  // namespace sd15::detail
+} // namespace sd15::detail

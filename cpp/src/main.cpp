@@ -49,7 +49,9 @@ int main(int argc, char** argv) {
         }
     }
     if (options.checkpoint.empty() || options.template_dir.empty() || options.output_dir.empty()) {
-        std::fprintf(stderr, "Usage: sd15-convert --checkpoint FILE --template-dir DIR --output DIR [--chunk-bytes N] [--hqq-iterations N] [--threads N]\n");
+        std::fprintf(
+            stderr,
+            "Usage: sd15-convert --checkpoint FILE --template-dir DIR --output DIR [--chunk-bytes N] [--hqq-iterations N] [--threads N]\n");
         return 2;
     }
     sd15::CancellationToken cancellation;
@@ -60,7 +62,7 @@ int main(int argc, char** argv) {
     }
     std::printf("Saved %s (chunk buffer: %zu bytes)\n", options.output_dir.c_str(), options.chunk_bytes);
     std::printf("elapsed_ms=%llu hqq_compute_ms=%.3f hqq_iterations=%s thread_count=%u\n",
-        static_cast<unsigned long long>(result.elapsed_ms), result.hqq_compute_ms,
-        result.hqq_iterations ? std::to_string(*result.hqq_iterations).c_str() : "none", options.thread_count);
+                static_cast<unsigned long long>(result.elapsed_ms), result.hqq_compute_ms,
+                result.hqq_iterations ? std::to_string(*result.hqq_iterations).c_str() : "none", options.thread_count);
     return 0;
 }

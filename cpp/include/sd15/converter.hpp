@@ -29,9 +29,21 @@ struct ConvertOptions {
 };
 
 enum class ErrorCode {
-    None, InvalidInput, IncompatibleTemplate, TensorMismatch, OutputExists,
-    StaleOutput, Busy, ReadFailed, WriteFailed, InsufficientSpace,
-    NonFiniteWeight, OutOfMemory, CallbackFailed, CleanupFailed, InternalError
+    None,
+    InvalidInput,
+    IncompatibleTemplate,
+    TensorMismatch,
+    OutputExists,
+    StaleOutput,
+    Busy,
+    ReadFailed,
+    WriteFailed,
+    InsufficientSpace,
+    NonFiniteWeight,
+    OutOfMemory,
+    CallbackFailed,
+    CleanupFailed,
+    InternalError
 };
 
 struct ConvertError {
@@ -91,6 +103,7 @@ class CancellationToken {
 public:
     void request_cancel() noexcept { requested_.store(true, std::memory_order_relaxed); }
     bool is_requested() const noexcept { return requested_.load(std::memory_order_relaxed); }
+
 private:
     std::atomic<bool> requested_{false};
 };
@@ -120,4 +133,4 @@ const char* error_code_name(ErrorCode code) noexcept;
 /// 완성 전 결과는 .partial에 쓰며 일반 오류 시 이번 작업 파일만 정리한다.
 bool convert(const ConvertOptions& options, std::string& error);
 
-}  // namespace sd15
+} // namespace sd15
