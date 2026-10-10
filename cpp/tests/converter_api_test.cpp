@@ -55,6 +55,13 @@ int main(int argc, char** argv) {
         const auto info = sd15::inspect(options);
         require(info.ok && info.output_bytes == 8 && info.files.size() == 1, "inspect output plan");
         require(!info.hqq_iterations, "float template has no HQQ iterations");
+        options.thread_count = 0;
+        require(sd15::inspect(options).error.code == sd15::ErrorCode::InvalidInput, "zero threads rejected");
+        options.thread_count = sd15::kMaxThreadCount + 1;
+        sd15::CancellationToken invalid_threads;
+        require(sd15::convert(options, {}, invalid_threads).error.code == sd15::ErrorCode::InvalidInput,
+                "excessive threads rejected before writing");
+        options.thread_count = 8;
         options.hqq_iterations = -1;
         require(sd15::inspect(options).error.code == sd15::ErrorCode::InvalidInput, "negative iterations rejected");
         options.hqq_iterations = sd15::kHqqIterations + 1;

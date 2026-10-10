@@ -72,7 +72,9 @@ class ConverterTest(unittest.TestCase):
         ).encode()
         self.checkpoint.write_bytes(struct.pack("<Q", len(header)) + header + data)
 
-    def run_converter(self, succeeds=True, iterations=None):
+    def run_converter(
+        self, succeeds=True, iterations=None, threads=None, chunk_bytes=4
+    ):
         (self.template / "manifest.json").write_text(json.dumps(self.manifest))
         result = subprocess.run(
             [
@@ -84,9 +86,10 @@ class ConverterTest(unittest.TestCase):
                 "--output",
                 str(self.output),
                 "--chunk-bytes",
-                "4",
+                str(chunk_bytes),
             ]
-            + ([] if iterations is None else ["--hqq-iterations", str(iterations)]),
+            + ([] if iterations is None else ["--hqq-iterations", str(iterations)])
+            + ([] if threads is None else ["--threads", str(threads)]),
             capture_output=True,
             text=True,
         )
@@ -102,6 +105,37 @@ class ConverterTest(unittest.TestCase):
         self.assertEqual(
             (self.output / "test.mnn").read_bytes(), b"MNN!" + half + bytes(19) + b"END"
         )
+
+    def test_thread_count_validation(self):
+        for threads in (0, 9, -1, "2x"):
+            with self.subTest(threads=threads):
+                self.run_converter(succeeds=False, threads=threads)
+
+    def test_parallel_hqq_matches_serial_across_batches(self):
+        self.configure_hqq([((i % 131) - 65) / 17 for i in range(65 * 128)], groups=65)
+        expected = None
+        for threads in (1, 2, 3, 4, 8):
+            for chunk_bytes in (4, 4096):
+                with self.subTest(threads=threads, chunk_bytes=chunk_bytes):
+                    self.output = self.root / f"out-{threads}-{chunk_bytes}"
+                    self.run_converter(threads=threads, chunk_bytes=chunk_bytes)
+                    data = (self.output / "test.mnn").read_bytes()
+                    if expected is None:
+                        expected = data
+                    self.assertEqual(data, expected)
+
+    def test_parallel_hqq_worker_error_cleans_output(self):
+        values = [((i % 131) - 65) / 17 for i in range(65 * 128)]
+        values[-2:] = [-3.4028234663852886e38, 3.4028234663852886e38]
+        self.configure_hqq(values, groups=65)
+        for threads in (2, 4, 8):
+            with self.subTest(threads=threads):
+                self.output = self.root / f"failed-{threads}"
+                result = self.run_converter(
+                    succeeds=False, threads=threads, chunk_bytes=65536
+                )
+                self.assertIn("INVALID_INPUT", result.stderr)
+                self.assertIn("weight: HQQ range overflow", result.stderr)
 
     def test_reads_new_weights_instead_of_reference_weights(self):
         self.write_source("F32", struct.pack("<6f", 1, 2, 3, 4, 5, 6))

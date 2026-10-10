@@ -13,6 +13,7 @@
 namespace sd15 {
 
 constexpr std::size_t kDefaultChunkBytes = 1024 * 1024;
+constexpr unsigned kMaxThreadCount = 8;
 
 /// 입력 체크포인트·템플릿 경로와 새 출력 디렉터리, 작업 청크 크기.
 struct ConvertOptions {
@@ -23,6 +24,8 @@ struct ConvertOptions {
     std::size_t chunk_bytes = kDefaultChunkBytes;
     /// HQQ 보정 횟수 [0, 20]. 0은 초기 min/max로 W8 양자화한다.
     int hqq_iterations = kHqqIterations;
+    /// 호출 스레드를 포함한 HQQ 계산 스레드 수 [1, 8].
+    unsigned thread_count = 1;
 };
 
 enum class ErrorCode {

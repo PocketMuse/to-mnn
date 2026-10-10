@@ -5,6 +5,7 @@
 #include "conversion_error.hpp"
 #include "conversion_json.hpp"
 #include "conversion_plan.hpp"
+#include "hqq_workers.hpp"
 
 #include <algorithm>
 #include <array>
@@ -295,7 +296,7 @@ bool write_tensor(
 /// 그룹 배치만 메모리에 올리고 payload와 alpha를 각각의 출력 위치에 기록한다.
 bool write_quantized(
     File& source, File& output, const ConversionTask& task,
-    std::vector<uint8_t>& input, int iterations,
+    std::vector<uint8_t>& input, int iterations, HqqWorkers& workers,
     Progress& progress, ConvertError& error
 ) {
     const std::size_t area = task.group_elements;
@@ -324,14 +325,10 @@ bool write_quantized(
             cursor += read_count;
         }
         const auto compute_begin = Clock::now();
-        for (std::size_t i = 0; i < count; ++i) {
-            progress.check();
-            progress.emit();
-            const auto hqq_error = encode_hqq_group(values.data() + i * area, area, iterations,
-                                                   payload.data() + i * area, scales.data() + i * kHqqAlphaBytes);
-            if (hqq_error != HqqError::None) {
-                return fail(error, ErrorCode::InvalidInput, hqq_error_message(hqq_error));
-            }
+        const auto hqq_error = workers.run(
+            {values.data(), payload.data(), scales.data(), count, area, iterations}, progress);
+        if (hqq_error != HqqError::None) {
+            return fail(error, ErrorCode::InvalidInput, hqq_error_message(hqq_error));
         }
         progress.hqq_compute_time += Clock::now() - compute_begin;
         if (!output.write_at(task.output_offset + group * area, payload.data(), elements, error) ||
@@ -347,6 +344,9 @@ bool write_quantized(
 bool prepare(const ConvertOptions& options, File& checkpoint, File& template_file,
              ConversionPlan& plan, InspectResult& info, ConvertError& error) {
     try {
+        if (options.thread_count < 1 || options.thread_count > kMaxThreadCount) {
+            return fail(error, ErrorCode::InvalidInput, "Thread count must be in [1, 8]");
+        }
         if (options.hqq_iterations < 0 || options.hqq_iterations > kHqqIterations) {
             return fail(error, ErrorCode::InvalidInput, "HQQ iterations must be in [0, 20]");
         }
@@ -431,10 +431,10 @@ bool prepare(const ConvertOptions& options, File& checkpoint, File& template_fil
 
 bool write_task(File& checkpoint, File& template_file, File& output,
                 const ConversionTask& task, std::vector<uint8_t>& input,
-                std::vector<uint8_t>& converted, int iterations,
+                std::vector<uint8_t>& converted, int iterations, HqqWorkers& workers,
                 Progress& progress, ConvertError& error) {
     if (task.kind == TaskKind::Hqq) {
-        return write_quantized(checkpoint, output, task, input, iterations, progress, error);
+        return write_quantized(checkpoint, output, task, input, iterations, workers, progress, error);
     }
     if (!output.seek(task.output_offset, error)) {
         return false;
@@ -505,6 +505,7 @@ void run(const ConvertOptions& options, Progress& progress, OutputDirectory& sta
     }
     std::vector<uint8_t> input(options.chunk_bytes);
     std::vector<uint8_t> converted(options.chunk_bytes * 2);
+    HqqWorkers workers(plan.has_hqq ? options.thread_count : 1);
     if (!staging.create(error) || !write_owner(staging, plan, error)) {
         return;
     }
@@ -520,7 +521,7 @@ void run(const ConvertOptions& options, Progress& progress, OutputDirectory& sta
         for (const auto& task : file.tasks) {
             progress.check();
             if (!write_task(checkpoint, template_file, output, task, input, converted,
-                            options.hqq_iterations, progress, error)) {
+                            options.hqq_iterations, workers, progress, error)) {
                 error.tensor = task.tensor;
                 if (!task.tensor.empty()) {
                     if (error.path.empty()) {

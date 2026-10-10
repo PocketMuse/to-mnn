@@ -27,6 +27,7 @@ options.template_dir = "/app/templates/sd15-hqq-b128";
 options.output_dir = "/app/models/converted";
 options.chunk_bytes = sd15::kDefaultChunkBytes;
 options.hqq_iterations = 20;
+options.thread_count = 4;
 ```
 
 * 앱이 관리하는 로컬 경로 사용. 파일 선택 URI는 로컬 파일로 준비
@@ -36,6 +37,12 @@ options.hqq_iterations = 20;
 * 기존 manifest의 20회는 참조 설정으로 유지. 실행 횟수만 덮어쓰며 템플릿 재생성은 불필요
 * FP16 전용 템플릿에는 적용되지 않음. 기본 20회만 기존 참조 모델과 바이트 일치를 기대
 * CLI: `--hqq-iterations 10`. 0회는 MNNConvert의 `--hqq` 미적용과 바이트 일치를 보장하지 않음
+* `thread_count`: 1~8, 기본 1. 호출 스레드를 포함한 HQQ 계산 스레드 수. CLI는 `--threads 4`
+* 앱에서 수를 선택하고 C++이 추가 스레드를 변환마다 한 번 생성·재사용·종료. HQQ가 없으면 추가 스레드를 만들지 않음
+* 한 배치의 그룹을 연속 범위로 나눔. 입력 버퍼는 공유하고 payload/alpha는 겹치지 않는 구간에 기록. 그룹보다 많은 스레드는 계산하지 않음
+* 그룹 내부 연산 순서는 동일. FP 변환·파일 I/O·콜백은 호출 스레드에서 실행. 동기 API는 UI 스레드 밖에서 호출
+* 작업 중 스레드 수는 고정. 취소·콜백 예외·계산 오류 시 배치 작업 완료를 기다린 뒤 버퍼와 스레드를 정리
+* 큰 버퍼는 스레드 수만큼 복제하지 않지만 스레드 스택 등 추가 메모리는 발생. 실제 Android 기본값은 기기 측정 후 결정
 
 > 기존 출력 폴더는 덮어쓰지 않음. 청크 크기는 전체 메모리 상한이 아님
 
