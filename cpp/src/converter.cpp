@@ -577,7 +577,8 @@ bool write_tensor(
 /// 그룹 배치만 메모리에 올리고 payload와 alpha를 각각의 출력 위치에 기록한다.
 bool write_quantized(
     File& source, File& output, const SourceTensor& tensor,
-    const Json& weight, const Json& alpha, std::vector<uint8_t>& input, Progress& progress, ConvertError& error
+    const Json& weight, const Json& alpha, std::vector<uint8_t>& input, int iterations,
+    Progress& progress, ConvertError& error
 ) {
     const auto& recipe = weight.at("quantization");
     const std::size_t area = unsigned_value(recipe.at("group_elements"));
@@ -615,11 +616,12 @@ bool write_quantized(
             }
             cursor += read_count;
         }
+        const auto compute_begin = Clock::now();
         for (std::size_t i = 0; i < count; ++i) {
             progress.check();
             progress.emit();
             float pair[kHqqAlphaValues];
-            quantize_hqq(values.data() + i * area, area, payload.data() + i * area, pair);
+            quantize_hqq(values.data() + i * area, area, payload.data() + i * area, pair, iterations);
             for (std::size_t j = 0; j < kHqqAlphaValues; ++j) {
                 if (!std::isfinite(pair[j])) {
                     return fail(error, "Non-finite HQQ scale");
@@ -629,6 +631,7 @@ bool write_quantized(
                 write_le(scales.data() + i * kHqqAlphaBytes + j * sizeof(float), bits, sizeof(bits));
             }
         }
+        progress.hqq_compute_time += Clock::now() - compute_begin;
         if (!output.write_at(unsigned_value(weight.at("offset")) + group * area, payload.data(), elements, error) ||
             !output.write_at(unsigned_value(alpha.at("offset")) + group * kHqqAlphaBytes, scales.data(), count * kHqqAlphaBytes, error)) {
             return false;
@@ -642,6 +645,9 @@ bool write_quantized(
 bool prepare(const ConvertOptions& options, File& checkpoint, File& template_file,
              SourceIndex& source, Json& manifest, InspectResult& info, ConvertError& error) {
     error.code = ErrorCode::InvalidInput;
+    if (options.hqq_iterations < 0 || options.hqq_iterations > kHqqIterations) {
+        return fail(error, "HQQ iterations must be in [0, 20]");
+    }
     if (options.checkpoint.empty() || options.template_dir.empty() || options.output_dir.empty()) {
         return fail(error, "Checkpoint, template and output paths are required");
     }
@@ -688,6 +694,12 @@ bool prepare(const ConvertOptions& options, File& checkpoint, File& template_fil
     info.mnn_version = manifest.at("mnn_version");
     info.unet_quantization = manifest.value("unet_quantization", "unspecified");
     for (const auto& file : manifest.at("files")) {
+        for (const auto& segment : file.at("segments")) {
+            if (segment.at("kind") == kQuantizedSegment) {
+                info.hqq_iterations = options.hqq_iterations;
+                break;
+            }
+        }
         const uint64_t size = unsigned_value(file.at("size"));
         if (size > UINT64_MAX - info.output_bytes) {
             return fail(error, "Output size overflow");
@@ -730,6 +742,7 @@ bool run(const ConvertOptions& options, Progress& progress, OutputDirectory& sta
         return fail(error, "Staging directory already exists");
     }
     progress.value.total_bytes = info.output_bytes;
+    result.hqq_iterations = info.hqq_iterations;
     for (const auto& file : manifest.at("files")) {
         for (const auto& segment : file.at("segments")) {
             const std::string kind = segment.at("kind");
@@ -781,7 +794,8 @@ bool run(const ConvertOptions& options, Progress& progress, OutputDirectory& sta
                 const auto alpha = std::find_if(segments.begin(), segments.end(), [&key](const Json& item) {
                     return item.at("kind") == kQuantizedSegment && item.at("key") == key && item.at("field") == "Alpha";
                 });
-                if (!write_quantized(checkpoint, output, source.at(key), segment, *alpha, input, progress, error)) {
+                if (!write_quantized(checkpoint, output, source.at(key), segment, *alpha, input,
+                                     options.hqq_iterations, progress, error)) {
                     error.message = key + ": " + error.message;
                     return false;
                 }
@@ -906,6 +920,7 @@ ConvertResult convert(const ConvertOptions& options, const ProgressCallback& on_
         result.files.clear();
     }
     result.elapsed_ms = progress.elapsed();
+    result.hqq_compute_ms = progress.hqq_compute_time.count() * 1000.0;
     return result;
 }
 

@@ -7,9 +7,12 @@
 
 namespace sd15 {
 
-void quantize_hqq(const float* weights, std::size_t count, uint8_t* payload, float* alpha) {
+void quantize_hqq(const float* weights, std::size_t count, uint8_t* payload, float* alpha, int iterations) {
     if (count == 0 || count > kMaxHqqGroupElements) {
         throw std::runtime_error("Invalid HQQ group size");
+    }
+    if (iterations < 0 || iterations > kHqqIterations) {
+        throw std::invalid_argument("HQQ iterations must be in [0, 20]");
     }
     constexpr float kQuantRange = 255.0f;
     constexpr float kMinScale = 1e-7f;
@@ -31,8 +34,8 @@ void quantize_hqq(const float* weights, std::size_t count, uint8_t* payload, flo
     if (!std::isfinite(zero) || !std::isfinite(maximum * inverse)) {
         throw std::runtime_error("HQQ normalization overflow");
     }
-    // MNN 3.6.1은 scale을 고정하고 같은 beta로 zero만 20회 갱신한다.
-    for (int iteration = 0; iteration < kHqqIterations; ++iteration) {
+    // MNN 3.6.1의 기본값은 20회다. 0회는 초기값을 유지한다.
+    for (int iteration = 0; iteration < iterations; ++iteration) {
         float sum = 0.0f;
         for (std::size_t i = 0; i < count; ++i) {
             const float rounded = std::clamp(std::round(weights[i] * inverse + zero), 0.0f, kQuantRange);

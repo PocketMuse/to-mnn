@@ -1,5 +1,7 @@
 #pragma once
 
+#include "sd15/hqq.hpp"
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -19,6 +21,8 @@ struct ConvertOptions {
     std::string output_dir;
     /// 입력 버퍼 크기. 4바이트~4MiB의 4의 배수이며 출력 버퍼는 두 배다.
     std::size_t chunk_bytes = kDefaultChunkBytes;
+    /// HQQ 보정 횟수 [0, 20]. 0은 초기 min/max로 W8 양자화한다.
+    int hqq_iterations = kHqqIterations;
 };
 
 enum class ErrorCode {
@@ -54,6 +58,8 @@ struct InspectResult {
     std::optional<uint64_t> available_bytes;
     bool partial_exists = false;
     ConvertError error;
+    /// 양자화 대상이 없으면 값 없음.
+    std::optional<int> hqq_iterations;
 };
 
 struct ConvertProgress {
@@ -72,6 +78,9 @@ struct ConvertResult {
     std::vector<OutputFile> files;
     uint64_t elapsed_ms = 0;
     ConvertError error;
+    std::optional<int> hqq_iterations;
+    /// HQQ 계산 배치의 경과 시간. 입력 변환과 파일 I/O는 제외한다.
+    double hqq_compute_ms = 0;
 };
 
 /// 변환마다 새 토큰을 사용한다. 반복 요청은 안전하며 리셋하지 않는다.

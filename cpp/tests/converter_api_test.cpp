@@ -54,12 +54,21 @@ int main(int argc, char** argv) {
     try {
         const auto info = sd15::inspect(options);
         require(info.ok && info.output_bytes == 8 && info.files.size() == 1, "inspect output plan");
+        require(!info.hqq_iterations, "float template has no HQQ iterations");
+        options.hqq_iterations = -1;
+        require(sd15::inspect(options).error.code == sd15::ErrorCode::InvalidInput, "negative iterations rejected");
+        options.hqq_iterations = sd15::kHqqIterations + 1;
+        sd15::CancellationToken invalid_iterations;
+        require(sd15::convert(options, {}, invalid_iterations).error.code == sd15::ErrorCode::InvalidInput,
+                "excessive iterations rejected before writing");
+        options.hqq_iterations = sd15::kHqqIterations;
         require(!fs::exists(root / "out.partial"), "inspect must not write");
 
         sd15::CancellationToken token;
         std::vector<sd15::ConvertProgress> events;
         const auto result = sd15::convert(options, [&](const auto& progress) { events.push_back(progress); }, token);
         require(result.status == sd15::ConvertStatus::Succeeded, "conversion succeeds");
+        require(!result.hqq_iterations && result.hqq_compute_ms == 0, "float conversion has no HQQ work");
         require(!events.empty() && events.back().stage == sd15::ConvertStage::Completed, "completion event");
         require(events.back().completed_bytes == 8 && events.back().remaining_ms == 0, "completed progress");
         require(result.files.size() == 1 && result.files[0].size_bytes == 8, "output result");
@@ -200,6 +209,27 @@ int main(int argc, char** argv) {
         }
         require(service.get_conversion_status(job.job_id)->state == sd15::JobState::Cancelled, "terminal status retained");
         require(!fs::exists(root / "job.partial"), "job cancellation cleanup");
+
+        const Json recipe = {{"algorithm", "hqq"}, {"bits", 8}, {"iterations", 20},
+            {"lp_norm", 0.7}, {"beta", 10.0}, {"group_elements", 2}, {"group_count", 1}};
+        const Json common = {{"kind", "quantized"}, {"key", "weight"}, {"source_shape", {2}},
+            {"positive_zero", false}, {"quantization", recipe}};
+        Json weight = common;
+        weight.update({{"field", "Weight"}, {"dtype", "U8"}, {"shape", {2}}, {"offset", 8}, {"size", 2}});
+        Json alpha = common;
+        alpha.update({{"field", "Alpha"}, {"dtype", "F32"}, {"shape", {1, 2}}, {"offset", 0}, {"size", 8}});
+        manifest["version"] = 2;
+        manifest["files"] = Json::array({{{"name", "test.mnn"}, {"size", 10},
+            {"segments", Json::array({alpha, weight})}}});
+        save_manifest();
+        options.output_dir = (root / "hqq-zero").string();
+        options.hqq_iterations = 0;
+        const auto quantized_info = sd15::inspect(options);
+        require(quantized_info.ok && quantized_info.hqq_iterations == 0, "inspect reports zero refinement");
+        sd15::CancellationToken quantized_token;
+        const auto quantized_result = sd15::convert(options, {}, quantized_token);
+        require(quantized_result.status == sd15::ConvertStatus::Succeeded && quantized_result.hqq_iterations == 0,
+                "conversion reports effective refinement count");
         std::cout << "Converter API tests passed\n";
     }
     catch (const std::exception& error) {

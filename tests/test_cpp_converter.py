@@ -72,7 +72,7 @@ class ConverterTest(unittest.TestCase):
         ).encode()
         self.checkpoint.write_bytes(struct.pack("<Q", len(header)) + header + data)
 
-    def run_converter(self, succeeds=True):
+    def run_converter(self, succeeds=True, iterations=None):
         (self.template / "manifest.json").write_text(json.dumps(self.manifest))
         result = subprocess.run(
             [
@@ -85,7 +85,8 @@ class ConverterTest(unittest.TestCase):
                 str(self.output),
                 "--chunk-bytes",
                 "4",
-            ],
+            ]
+            + ([] if iterations is None else ["--hqq-iterations", str(iterations)]),
             capture_output=True,
             text=True,
         )
@@ -171,6 +172,30 @@ class ConverterTest(unittest.TestCase):
         minimum, scale = struct.unpack("<2f", data[:8])
         self.assertAlmostEqual(minimum, -1, places=6)
         self.assertAlmostEqual(scale, 2 / 255, places=8)
+
+    def test_hqq_zero_skips_refinement_and_default_matches_twenty(self):
+        self.configure_hqq([0, 0.49, 1.49, 255])
+        outputs = {}
+        for count in (None, 20, 15, 10, 5, 0):
+            self.output = self.root / f"out-{count}"
+            result = self.run_converter(iterations=count)
+            self.assertIn(
+                f"hqq_iterations={20 if count is None else count}", result.stdout
+            )
+            self.assertIn("hqq_compute_ms=", result.stdout)
+            outputs[count] = (self.output / "test.mnn").read_bytes()
+        self.assertEqual(outputs[None], outputs[20])
+        minimum, scale = struct.unpack("<2f", outputs[0][:8])
+        self.assertEqual(minimum, 0)
+        self.assertEqual(scale, 1)
+        self.assertEqual(outputs[0][8:], bytes([0, 0, 1, 255]))
+        self.assertNotEqual(outputs[0], outputs[20])
+
+    def test_hqq_rejects_invalid_iteration_options(self):
+        self.configure_hqq([-1, 1])
+        for count in (-1, 21, "1.5", "oops"):
+            with self.subTest(iterations=count):
+                self.run_converter(False, iterations=count)
 
     def test_hqq_reads_replacement_weights(self):
         self.configure_hqq([-2, 2, -1, 1], groups=2)

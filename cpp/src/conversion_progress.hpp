@@ -24,6 +24,7 @@ struct Progress {
     Clock::time_point started = Clock::now();
     Clock::time_point notified = started;
     ConvertProgress value;
+    std::chrono::duration<double> hqq_compute_time{};
     std::array<uint64_t, static_cast<std::size_t>(WorkKind::Count)> total{};
     std::array<uint64_t, static_cast<std::size_t>(WorkKind::Count)> done{};
     std::array<double, static_cast<std::size_t>(WorkKind::Count)> seconds{};

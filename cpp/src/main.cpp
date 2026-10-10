@@ -29,20 +29,31 @@ int main(int argc, char** argv) {
                 return 2;
             }
         }
+        else if (flag == "--hqq-iterations") {
+            const auto result = std::from_chars(value.data(), value.data() + value.size(), options.hqq_iterations);
+            if (result.ec != std::errc{} || result.ptr != value.data() + value.size()) {
+                std::fprintf(stderr, "Invalid HQQ iterations\n");
+                return 2;
+            }
+        }
         else {
             std::fprintf(stderr, "Unknown option: %s\n", argv[i]);
             return 2;
         }
     }
     if (options.checkpoint.empty() || options.template_dir.empty() || options.output_dir.empty()) {
-        std::fprintf(stderr, "Usage: sd15-convert --checkpoint FILE --template-dir DIR --output DIR [--chunk-bytes N]\n");
+        std::fprintf(stderr, "Usage: sd15-convert --checkpoint FILE --template-dir DIR --output DIR [--chunk-bytes N] [--hqq-iterations N]\n");
         return 2;
     }
-    std::string error;
-    if (!sd15::convert(options, error)) {
-        std::fprintf(stderr, "%s\n", error.c_str());
+    sd15::CancellationToken cancellation;
+    const auto result = sd15::convert(options, {}, cancellation);
+    if (result.status != sd15::ConvertStatus::Succeeded) {
+        std::fprintf(stderr, "%s: %s\n", sd15::error_code_name(result.error.code), result.error.message.c_str());
         return 1;
     }
     std::printf("Saved %s (chunk buffer: %zu bytes)\n", options.output_dir.c_str(), options.chunk_bytes);
+    std::printf("elapsed_ms=%llu hqq_compute_ms=%.3f hqq_iterations=%s\n",
+        static_cast<unsigned long long>(result.elapsed_ms), result.hqq_compute_ms,
+        result.hqq_iterations ? std::to_string(*result.hqq_iterations).c_str() : "none");
     return 0;
 }

@@ -77,6 +77,8 @@ docker compose -f compose.sd15.yaml run --rm compare
 * MNNConvert나 MNN Runtime 없이 safetensors와 템플릿으로 변환
 * 출력: `artifacts/mnn-cpp-hqq-b128-manual/{text_encoder,unet,vae_decoder}.mnn`
 * `convert` 서비스의 `command`에 `--chunk-bytes`를 추가해 입력 버퍼 조정 가능 (기본 1MiB)
+* `--hqq-iterations N`으로 HQQ 보정 횟수 지정 (0~20, 기본 20). 0도 W8 양자화하며, 20 이외에는 기준 모델과 바이트 일치를 기대하지 않음
+* CLI는 전체 `elapsed_ms`와 입력 변환·파일 I/O를 제외한 `hqq_compute_ms`를 출력
 * 64MiB 제한은 Docker 검증 조건이며 Android 검증 결과는 아님
 
 > 기존 출력 폴더는 덮어쓰지 않음. 재실행시 Compose의 출력·비교 경로와 4번의 추론 경로를 함께 변경

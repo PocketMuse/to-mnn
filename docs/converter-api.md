@@ -15,11 +15,16 @@ options.checkpoint = "/app/models/model.safetensors";
 options.template_dir = "/app/templates/sd15-hqq-b128";
 options.output_dir = "/app/models/converted";
 options.chunk_bytes = sd15::kDefaultChunkBytes;
+options.hqq_iterations = 20;
 ```
 
 * 앱이 관리하는 로컬 경로 사용. 파일 선택 URI는 로컬 파일로 준비
 * 출력 부모 폴더는 미리 생성하고 입력·템플릿은 작업 중 변경하지 않음
 * 입력 청크 기본 1MiB, 허용 범위 4바이트~4MiB의 4의 배수
+* `hqq_iterations`: 0~20, 기본 20. 0은 초기 min/max로 W8 양자화하고 HQQ 보정을 생략
+* 기존 manifest의 20회는 참조 설정으로 유지. 실행 횟수만 덮어쓰며 템플릿 재생성은 불필요
+* FP16 전용 템플릿에는 적용되지 않음. 기본 20회만 기존 참조 모델과 바이트 일치를 기대
+* CLI: `--hqq-iterations 10`. 0회는 MNNConvert의 `--hqq` 미적용과 바이트 일치를 보장하지 않음
 
 > 기존 출력 폴더는 덮어쓰지 않음. 청크 크기는 전체 메모리 상한이 아님
 
@@ -45,6 +50,7 @@ const auto info = sd15::inspect(options);
 | `files` | 출력 파일별 `name`, `size_bytes` |
 | `output_bytes`, `available_bytes` | 예상 출력 크기·가용 공간. 조회 불가시 가용 공간은 값 없음 |
 | `partial_exists` | 동일 출력 경로의 `.partial` 존재 여부 |
+| `hqq_iterations` | 적용할 보정 횟수. 양자화 대상이 없으면 값 없음 |
 
 > 신뢰하는 배포 템플릿과의 호환성 검사. 입력 URI 복사·파일 시스템 메타데이터 용량은 별도
 
@@ -61,6 +67,9 @@ const auto result = sd15::convert(options, [](const sd15::ConvertProgress& progr
 
 * 호출 스레드에서 입력을 다시 검사하고 `.partial`에 기록. 완료시 출력 폴더 이름으로 변경
 * 반환: `status`, `files`, `elapsed_ms`, `error`
+* 추가 반환: `hqq_iterations`, `hqq_compute_ms`. 횟수는 검사 완료 후 설정하며 대상이 없으면 값 없음
+* `hqq_compute_ms`는 완료된 HQQ 계산 배치의 누적 경과 시간. 초기화·보정·payload/alpha 생성과 진행 확인을 포함하고 입력 변환·파일 I/O는 제외
+* 계산 배치 내 진행 콜백 시간은 포함되므로 성능 측정은 빈 콜백으로 실행. 실패·취소 결과는 부분 집계일 수 있음
 * 상태: `Succeeded`, `Cancelled`, `Failed`. 실패·취소시 `files`는 비어 있음
 * 취소 토큰은 변환마다 새로 만들고 완료까지 유지. 반복 요청 가능
 * 청크·HQQ 그룹 경계와 출력 공개 직전에 취소 확인. 검사·파일 I/O 중에는 지연 가능
