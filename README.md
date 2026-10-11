@@ -131,6 +131,12 @@ uv run -m src.sd15.infer_mnn \
 
 > seed 미지정시 랜덤
 
+## 5. C++ Runtime으로 이미지 추론
+
+* Windows C++에서 CLIP → UNet → VAE 실행과 PNG 저장
+* 첫 버전은 Python에서 token IDs와 초기 latent를 준비
+* 빌드·입력 준비·실행: [Runtime 문서](docs/runtime-api.md)
+
 ## 테스트
 
 * 작은 테스트 데이터로 변환기·템플릿 생성기·비교기와 잘못된 입력 처리를 검사

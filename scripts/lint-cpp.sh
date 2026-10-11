@@ -12,11 +12,15 @@ case "$mode" in
 esac
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
-# Runtime과 외부 소스는 대상에 포함하지 않는다.
-mapfile -d '' files < <(find cpp/converter/include cpp/converter/src cpp/converter/tests cpp/cli -type f \
+# tidy는 Docker에서 빌드하는 Converter 대상이다. 포맷은 Runtime도 포함한다.
+paths=(cpp/converter/include cpp/converter/src cpp/converter/tests cpp/cli/convert_main.cpp)
+if [[ "$mode" != tidy ]]; then
+    paths+=(cpp/runtime cpp/cli/infer_main.cpp)
+fi
+mapfile -d '' files < <(find "${paths[@]}" -type f \
     \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) -print0 | sort -z)
 if [[ ${#files[@]} -eq 0 ]]; then
-    echo "No converter C++ files found" >&2
+    echo "No C++ files found" >&2
     exit 1
 fi
 

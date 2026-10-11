@@ -29,7 +29,15 @@ cpp/
 │   └── tests/                # C++ 테스트
 ├── cli/
 │   ├── CMakeLists.txt
-│   └── convert_main.cpp
+│   ├── convert_main.cpp
+│   └── infer_main.cpp
+├── runtime/
+│   ├── CMakeLists.txt
+│   ├── include/sd15/          # 공개 동기 추론 API
+│   ├── src/                  # MNN 실행·CFG·DDIM·RGB 변환
+│   └── tests/                # 계산·입력 검증
+├── cmake/
+│   └── MNN.cmake             # 준비된 MNN 라이브러리 연결
 └── pymnn/
     └── CMakeLists.txt         # 기존 Windows MNN의 Python 바인딩
 
@@ -51,16 +59,20 @@ docs/                         # 정책·API·검증 기록
 | `img/` | 추론 이미지 |
 
 * `MNNRuntime/`은 외부 엔진 작업 경로. 향후 구현할 우리 Runtime 소스와 구분
-* 현재 추론 흐름은 `src/sd15/infer_mnn.py`에 있음
-* `cpp/runtime/`은 아직 없음
+* C++ 추론은 `cpp/runtime/`, Python 비교 기준은 `src/sd15/infer_mnn.py`
+* 입력 token IDs·초기 latent는 `src/sd15/prepare_inference.py`에서 준비
 
 현재 의존성:
 
 ```text
 sd15-convert → sd15_converter → nlohmann_json, Threads
+sd15-infer → sd15_runtime → MNN
 Python 참조 추론 → pymnn → MNN
 ```
 
 * Converter는 MNNConvert·MNN Runtime 없이 실행
-* CMake는 현재 Converter와 CLI를 함께 구성. 테스트는 `BUILD_TESTING`으로 선택
+* CMake 선택: `SD15_BUILD_CONVERTER`(기본 ON), `SD15_BUILD_RUNTIME`(기본 OFF), `SD15_BUILD_CLI`(기본 ON)
+* 테스트는 `BUILD_TESTING`으로 선택. 기존 Docker Converter 빌드는 유지
 * Python 인터프리터는 Converter 테스트를 켰을 때 필요. `pymnn`은 별도 빌드
+* Runtime은 Windows OpenCL 동기 이미지 생성까지 구현. 취소·비동기·캐시는 미구현
+* Runtime 빌드·실행·검증 범위: [Runtime 문서](runtime-api.md)

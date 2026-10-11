@@ -1,0 +1,28 @@
+set(MNN_SOURCE_DIR "" CACHE PATH "MNN 3.6.1 source directory")
+set(MNN_RUNTIME_DIR "" CACHE PATH "Built MNN library directory")
+if(NOT EXISTS "${MNN_SOURCE_DIR}/include/MNN/Interpreter.hpp")
+    message(FATAL_ERROR "Set MNN_SOURCE_DIR to the MNN 3.6.1 source")
+endif()
+
+add_library(sd15_mnn SHARED IMPORTED GLOBAL)
+set_target_properties(sd15_mnn PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${MNN_SOURCE_DIR}/include")
+if(WIN32)
+    if(NOT MSVC)
+        message(FATAL_ERROR "Use MSVC with the Windows MNN build")
+    endif()
+    foreach(file MNN.dll MNN.lib)
+        if(NOT EXISTS "${MNN_RUNTIME_DIR}/${file}")
+            message(FATAL_ERROR "Missing ${MNN_RUNTIME_DIR}/${file}; build MNN first")
+        endif()
+    endforeach()
+    set_target_properties(sd15_mnn PROPERTIES
+        IMPORTED_LOCATION "${MNN_RUNTIME_DIR}/MNN.dll"
+        IMPORTED_IMPLIB "${MNN_RUNTIME_DIR}/MNN.lib"
+        INTERFACE_COMPILE_DEFINITIONS USING_MNN_DLL)
+else()
+    find_library(SD15_MNN_LIBRARY NAMES MNN PATHS "${MNN_RUNTIME_DIR}" NO_DEFAULT_PATH)
+    if(NOT SD15_MNN_LIBRARY)
+        message(FATAL_ERROR "Missing MNN library in MNN_RUNTIME_DIR")
+    endif()
+    set_target_properties(sd15_mnn PROPERTIES IMPORTED_LOCATION "${SD15_MNN_LIBRARY}")
+endif()

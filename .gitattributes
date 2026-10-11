@@ -1,5 +1,8 @@
 scripts/lint-cpp.sh text eol=lf
+scripts/build-runtime.sh text eol=lf
 cpp/converter/include/** text eol=lf
 cpp/converter/src/** text eol=lf
 cpp/converter/tests/** text eol=lf
 cpp/cli/** text eol=lf
+cpp/runtime/** text eol=lf
+cpp/cmake/** text eol=lf
