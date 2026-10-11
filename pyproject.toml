@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "ftfy>=6.3.1",
     "mnn>=3.6.1",
     "numpy>=2.5.3",
     "transformers>=5.17.0",
@@ -21,10 +22,6 @@ export = [
     "onnxruntime>=1.30.0",
     "safetensors>=0.8.0",
     "torch>=2.14.0",
-]
-runtime = [
-    "ftfy>=6.3.1",
-    "pillow>=12.3.0",
 ]
 
 [tool.uv.sources]

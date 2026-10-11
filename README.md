@@ -101,37 +101,17 @@ Requires:
 * Windows SDK
 * CMake
 * Ninja
-* uv
-* Python 3.12
 * OpenCL 지원 GPU 드라이버
 
 ```bash
-uv sync --locked --group runtime
-bash scripts/build-mnn.sh --python
+bash scripts/build-mnn.sh
 ```
 
-* MNN 3.6.1 소스를 내려받아 OpenCL Runtime과 Python 바인딩을 빌드
-* `--python`은 4번의 Python 추론 실행에 필요
+* MNN 3.6.1 소스를 내려받아 OpenCL Runtime을 빌드
 * Runtime 출력: `MNNRuntime/build/MNN.dll`
-* Python 바인딩: `MNNRuntime/python/_mnncengine*.pyd`
-* 빌드 로그: `MNNRuntime/{configure,build,python-configure,python-build}.log`
+* 빌드 로그: `MNNRuntime/{configure,build}.log`
 
-## 4. C++ W8 모델로 이미지 추론
-
-* 3번의 Windows OpenCL Runtime과 2번에서 생성한 C++ 출력 모델을 사용
-
-```bash
-uv run -m src.sd15.infer_mnn \
-  --model-dir artifacts/mnn-cpp-hqq-b128-manual \
-  --prompt "a photo of a cat sitting on a wooden table, natural light" \
-  --steps 20 \
-  --guidance 7.5 \
-  --output img/cat-hqq-cpp.png
-```
-
-> seed 미지정시 랜덤
-
-## 5. C++ Runtime으로 이미지 추론
+## 4. C++ Runtime으로 이미지 추론
 
 * Windows C++에서 CLIP → UNet → VAE 실행과 PNG 저장
 * 첫 버전은 Python에서 token IDs와 초기 latent를 준비

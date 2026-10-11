@@ -31,8 +31,8 @@ bash scripts/build-runtime.sh
 
 * 모델: 기존 Docker 흐름으로 생성한 `artifacts/mnn-cpp-hqq-b128-manual`
 * tokenizer/config: ONNX export가 만든 `artifacts/huggingface`
-* 입력 준비는 기존 Python runner와 같은 tokenizer·NumPy 난수를 사용
-* `uv sync --locked --group runtime`으로 Python 환경 준비
+* 입력 준비는 CLIP tokenizer·NumPy 난수를 사용
+* uv·Python 3.12 설치 후 `uv sync --locked`으로 입력 준비 환경 구성
 
 ```bash
 uv run -m src.sd15.prepare_inference \

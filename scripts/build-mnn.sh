@@ -13,12 +13,8 @@ fail() {
 
 # 1. 입력과 도구를 확인하고 경로를 확정한다.
 check_inputs() {
-    build_python=false
-    if [[ $# -gt 1 || ($# -eq 1 && "$1" != --python) ]]; then
-        fail "Usage: bash scripts/build-mnn.sh [--python]"
-    fi
-    if [[ $# -eq 1 ]]; then
-        build_python=true
+    if [[ $# -ne 0 ]]; then
+        fail "Usage: bash scripts/build-mnn.sh"
     fi
     if [[ ! "$BUILD_JOBS" =~ ^[1-9][0-9]*$ ]]; then
         fail "BUILD_JOBS must be a positive integer."
@@ -49,15 +45,6 @@ check_inputs() {
     RUNTIME_WINDOWS="$PROJECT_WINDOWS/MNNRuntime"
     readonly CMAKE_EXE GIT_EXE MKDIR_EXE TEE_EXE CYGPATH_EXE NINJA_EXE
     readonly PROJECT_DIR PROJECT_WINDOWS RUNTIME_DIR RUNTIME_WINDOWS
-
-    if "$build_python"; then
-        PYTHON_EXE=$("$CYGPATH_EXE" -m "${PYTHON_EXECUTABLE:-$PROJECT_DIR/.venv/Scripts/python.exe}")
-        readonly PYTHON_EXE
-        if [[ ! -f "$PYTHON_EXE" ]]; then
-            fail "Run uv sync --locked --group runtime first, or set PYTHON_EXECUTABLE."
-        fi
-        "$PYTHON_EXE" -c 'import sys; import numpy; sys.exit("Python 3.12 is required.") if sys.version_info[:2] != (3, 12) else None'
-    fi
 }
 
 # 2. 설치된 vcvars64.bat에서 MSVC x64 환경을 가져온다.
@@ -129,22 +116,7 @@ build_runtime() {
     echo "MNN $MNN_VERSION OpenCL Runtime built: $RUNTIME_DIR/build/MNN.dll"
 }
 
-# 5. --python이면 동일한 Runtime에 연결하는 Python 바인딩도 빌드한다.
-build_python_binding() {
-    "$CMAKE_EXE" -S "$PROJECT_WINDOWS/cpp/pymnn" -B "$RUNTIME_WINDOWS/python" -G Ninja \
-        "-DCMAKE_MAKE_PROGRAM=$NINJA_EXE" -DCMAKE_CXX_COMPILER=cl \
-        -DCMAKE_BUILD_TYPE=Release "-DPython3_EXECUTABLE=$PYTHON_EXE" \
-        "-DMNN_SOURCE_DIR=$RUNTIME_WINDOWS/MNN" "-DMNN_RUNTIME_DIR=$RUNTIME_WINDOWS/build" \
-        2>&1 | "$TEE_EXE" "$RUNTIME_DIR/python-configure.log"
-    "$CMAKE_EXE" --build "$RUNTIME_WINDOWS/python" --parallel "$BUILD_JOBS" \
-        2>&1 | "$TEE_EXE" "$RUNTIME_DIR/python-build.log"
-    echo "Python binding built: $RUNTIME_DIR/python"
-}
-
 check_inputs "$@"
 prepare_msvc
 prepare_source
 build_runtime
-if "$build_python"; then
-    build_python_binding
-fi

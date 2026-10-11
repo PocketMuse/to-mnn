@@ -646,6 +646,7 @@ name = "to-mnn"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "ftfy" },
     { name = "mnn" },
     { name = "numpy" },
     { name = "transformers" },
@@ -664,13 +665,10 @@ export = [
     { name = "torch", version = "2.14.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.14.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
 ]
-runtime = [
-    { name = "ftfy" },
-    { name = "pillow" },
-]
 
 [package.metadata]
 requires-dist = [
+    { name = "ftfy", specifier = ">=6.3.1" },
     { name = "mnn", specifier = ">=3.6.1" },
     { name = "numpy", specifier = ">=2.5.3" },
     { name = "transformers", specifier = ">=5.17.0" },
@@ -685,10 +683,6 @@ export = [
     { name = "onnxruntime", specifier = ">=1.30.0" },
     { name = "safetensors", specifier = ">=0.8.0" },
     { name = "torch", specifier = ">=2.14.0", index = "https://download.pytorch.org/whl/cpu" },
-]
-runtime = [
-    { name = "ftfy", specifier = ">=6.3.1" },
-    { name = "pillow", specifier = ">=12.3.0" },
 ]
 
 [[package]]
