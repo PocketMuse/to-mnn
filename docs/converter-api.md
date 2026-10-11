@@ -3,7 +3,8 @@
 ## 1. 입력 준비
 
 * C++17 정적 라이브러리: `sd15_converter`
-* 헤더: [converter.hpp](../cpp/include/sd15/converter.hpp), [conversion_service.hpp](../cpp/include/sd15/conversion_service.hpp)
+* 소스·C++ 테스트: `cpp/converter/`, CLI: `cpp/cli/`. CMake 진입점은 `cpp/`
+* 헤더: [converter.hpp](../cpp/converter/include/sd15/converter.hpp), [conversion_service.hpp](../cpp/converter/include/sd15/conversion_service.hpp)
 * 입력: F32/F16 safetensors, `graph.bin`, `manifest.json`
 * 출력: `{text_encoder,unet,vae_decoder}.mnn`과 필요한 외부 가중치
 * MNNConvert나 MNN Runtime 없이 변환. FP16 템플릿 v1, HQQ 템플릿 v2 지원

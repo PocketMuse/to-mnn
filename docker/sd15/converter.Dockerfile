@@ -13,6 +13,6 @@ FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libstdc++6 time \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /workspace/build/sd15-convert /usr/local/bin/sd15-convert
-COPY --from=build /workspace/build/sd15-api-test /usr/local/bin/sd15-api-test
+COPY --from=build /workspace/build/cli/sd15-convert /usr/local/bin/sd15-convert
+COPY --from=build /workspace/build/converter/sd15-api-test /usr/local/bin/sd15-api-test
 ENTRYPOINT ["sd15-convert"]

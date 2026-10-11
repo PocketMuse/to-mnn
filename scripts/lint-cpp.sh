@@ -13,7 +13,7 @@ esac
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 # Runtime과 외부 소스는 대상에 포함하지 않는다.
-mapfile -d '' files < <(find cpp/include cpp/src cpp/tests -type f \
+mapfile -d '' files < <(find cpp/converter/include cpp/converter/src cpp/converter/tests cpp/cli -type f \
     \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) -print0 | sort -z)
 if [[ ${#files[@]} -eq 0 ]]; then
     echo "No converter C++ files found" >&2
