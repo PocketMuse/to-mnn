@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <random>
 #include <stdexcept>
 
 namespace sd15::detail {
@@ -36,22 +37,21 @@ std::vector<int> timesteps(const SchedulerConfig& config, int steps) {
 }
 
 void validate(const GenerateOptions& options) {
-    timesteps(options.scheduler, options.steps);
-    if (options.model_dir.empty() || !std::isfinite(options.guidance) || !std::isfinite(options.vae_scaling_factor) ||
-        options.vae_scaling_factor <= 0) {
-        throw std::invalid_argument("Invalid model path, guidance or VAE scaling factor");
+    timesteps(SchedulerConfig{}, options.steps);
+    if (!std::isfinite(options.guidance)) {
+        throw std::invalid_argument("Guidance must be finite");
     }
-    for (const auto* tokens : {&options.tokens, &options.negative_tokens}) {
-        if (tokens->size() != kSequenceLength ||
-            std::any_of(tokens->begin(), tokens->end(), [](int32_t id) { return id < 0 || id >= kVocabularySize; })) {
-            throw std::invalid_argument("Expected 77 CLIP token IDs in [0, 49408)");
-        }
+}
+
+std::vector<float> initial_noise(uint32_t seed) {
+    // MNN diffusion 예제와 동일한 방식. 분포의 비트 재현성은 표준 라이브러리에 의존한다.
+    std::mt19937 engine(seed);
+    std::normal_distribution<float> normal(0, 1);
+    std::vector<float> latent(kLatentElements);
+    for (auto& value : latent) {
+        value = normal(engine);
     }
-    if (options.initial_latent.size() != kLatentElements ||
-        std::any_of(options.initial_latent.begin(), options.initial_latent.end(),
-                    [](float value) { return !std::isfinite(value); })) {
-        throw std::invalid_argument("Expected finite initial latent with shape [1, 4, 64, 64]");
-    }
+    return latent;
 }
 
 std::vector<float> alphas(const SchedulerConfig& config) {

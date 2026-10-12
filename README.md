@@ -114,8 +114,7 @@ bash scripts/build-mnn.sh
 ## 4. C++ Runtime으로 이미지 추론
 
 * Windows C++에서 CLIP → UNet → VAE 실행과 PNG 저장
-* 첫 버전은 Python에서 token IDs와 초기 latent를 준비
-* 빌드·입력 준비·실행: [Runtime 문서](docs/runtime-api.md)
+* C++에서 prompt 토큰화와 seed 기반 초기 latent 생성.
 
 ## 테스트
 

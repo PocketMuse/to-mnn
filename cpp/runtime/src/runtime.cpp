@@ -1,11 +1,13 @@
 #include "sd15/runtime.hpp"
 #include "diffusion.hpp"
+#include "clip_tokenizer.hpp"
 
 #include <MNN/Interpreter.hpp>
 #include <MNN/Tensor.hpp>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <filesystem>
 #include <memory>
@@ -15,10 +17,11 @@ namespace sd15 {
 namespace {
 
 constexpr int kHiddenSize = 768;
+constexpr float kVaeScalingFactor = 0.18215f;
 const std::vector<int> kLatentShape{1, 4, 64, 64};
 const std::vector<int> kContextShape{1, kSequenceLength, kHiddenSize};
 
-// Interpreter가 Session까지 소유한다. 구성 요소 종료 시 GPU 자원을 해제한다.
+// Interpreter가 Session까지 소유한다. 단계 종료 시 엔진에 자원을 반환한다.
 class Model {
 public:
     Model(const std::filesystem::path& path, std::size_t input_count) {
@@ -105,8 +108,20 @@ private:
 
 } // namespace
 
-Image generate(const GenerateOptions& options, const InferenceProgress& progress) {
-    detail::validate(options);
+struct Sd15Runtime::Impl {
+    explicit Impl(const RuntimeOptions& options)
+        : root(options.model_dir),
+          tokenizer(options.tokenizer_dir.empty() ? (root / "tokenizer").string() : options.tokenizer_dir) {}
+
+    const std::filesystem::path root;
+    const detail::ClipTokenizer tokenizer;
+    std::atomic_flag busy = ATOMIC_FLAG_INIT;
+};
+
+Sd15Runtime::Sd15Runtime(const RuntimeOptions& options) {
+    if (options.model_dir.empty()) {
+        throw std::invalid_argument("Model directory is required");
+    }
     if (std::string(MNN::getVersion()) != "3.6.1") {
         throw std::runtime_error("MNN 3.6.1 is required");
     }
@@ -116,24 +131,44 @@ Image generate(const GenerateOptions& options, const InferenceProgress& progress
             throw std::runtime_error("Missing model: " + (root / name).string());
         }
     }
+    impl_ = std::make_unique<Impl>(options);
+}
+
+Sd15Runtime::~Sd15Runtime() = default;
+
+Image Sd15Runtime::generate(const GenerateOptions& request, const InferenceProgress& progress) {
+    if (impl_->busy.test_and_set(std::memory_order_acquire)) {
+        throw std::runtime_error("Runtime is busy");
+    }
+    struct ResetBusy {
+        std::atomic_flag& flag;
+        ~ResetBusy() { flag.clear(std::memory_order_release); }
+    } reset{impl_->busy};
+    // 콜백에서 호출자가 원래 요청을 바꾸어도 이번 생성의 설정은 유지한다.
+    const auto options = request;
+    detail::validate(options);
+    const auto& root = impl_->root;
+    const auto tokens = impl_->tokenizer.encode(options.prompt);
+    const auto negative_tokens = impl_->tokenizer.encode(options.negative_prompt);
+    const detail::SchedulerConfig scheduler;
     const auto notify = [&](const char* stage, int step = 0) {
         if (progress) {
             progress(stage, step, options.steps);
         }
     };
-    const auto alpha = detail::alphas(options.scheduler);
-    const auto times = detail::timesteps(options.scheduler, options.steps);
+    const auto alpha = detail::alphas(scheduler);
+    const auto times = detail::timesteps(scheduler, options.steps);
     std::vector<float> negative_context;
     std::vector<float> context;
     {
         notify("text_encoder");
         Model encoder(root / "text_encoder.mnn", 1);
-        encoder.input("input_ids", {1, kSequenceLength}, options.negative_tokens);
+        encoder.input("input_ids", {1, kSequenceLength}, negative_tokens);
         negative_context = encoder.run("last_hidden_state", kContextShape);
-        encoder.input("input_ids", {1, kSequenceLength}, options.tokens);
+        encoder.input("input_ids", {1, kSequenceLength}, tokens);
         context = encoder.run("last_hidden_state", kContextShape);
     }
-    auto latent = options.initial_latent;
+    auto latent = detail::initial_noise(options.seed);
     {
         notify("unet");
         Model unet(root / "unet.mnn", 3);
@@ -148,16 +183,16 @@ Image generate(const GenerateOptions& options, const InferenceProgress& progress
             unet.input<int32_t>("timestep", {1}, {time});
             unet.input("encoder_hidden_states", kContextShape, context);
             const auto positive = unet.run("out_sample", kLatentShape);
-            const int previous = time - options.scheduler.train_steps / options.steps;
+            const int previous = time - scheduler.train_steps / options.steps;
             const float previous_alpha =
-                previous >= 0 ? alpha[previous] : (options.scheduler.set_alpha_to_one ? 1.0f : alpha.front());
+                previous >= 0 ? alpha[previous] : (scheduler.set_alpha_to_one ? 1.0f : alpha.front());
             detail::ddim_step(latent, negative, positive, options.guidance, alpha[time], previous_alpha);
             notify("denoising", i + 1);
         }
     }
     notify("vae_decoder");
     for (auto& value : latent) {
-        value /= options.vae_scaling_factor;
+        value /= kVaeScalingFactor;
         if (!std::isfinite(value)) {
             throw std::runtime_error("Non-finite VAE input");
         }

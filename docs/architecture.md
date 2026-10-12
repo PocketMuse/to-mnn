@@ -34,8 +34,8 @@ cpp/
 ├── runtime/
 │   ├── CMakeLists.txt
 │   ├── include/sd15/          # 공개 동기 추론 API
-│   ├── src/                  # MNN 실행·CFG·DDIM·RGB 변환
-│   └── tests/                # 계산·입력 검증
+│   ├── src/                  # C++ 토큰화·난수·MNN 실행·CFG·DDIM
+│   └── tests/                # 계산·토큰화·반복 생성 검증
 └── cmake/
     └── MNN.cmake             # 준비된 MNN 라이브러리 연결
 
@@ -58,13 +58,13 @@ docs/                         # 정책·API·검증 기록
 
 * `MNNRuntime/`은 외부 엔진 작업 경로. 프로젝트 Runtime 소스와 구분
 * 추론 엔진은 `cpp/runtime/`에서 관리
-* 입력 token IDs·초기 latent는 `src/sd15/prepare_inference.py`에서 준비
+* Runtime이 prompt·seed에서 token IDs·초기 latent를 생성.
 
 현재 의존성:
 
 ```text
 sd15-convert → sd15_converter → nlohmann_json, Threads
-sd15-infer → sd15_runtime → MNN
+sd15-infer → sd15_runtime → MNN, MNN Unicode 소스, JSON 헤더
 ```
 
 * Converter는 MNNConvert·MNN Runtime 없이 실행

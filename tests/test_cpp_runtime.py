@@ -1,6 +1,5 @@
 """Windows C++ Runtime CLI의 도움말과 입력 검증을 검사한다."""
 
-import json
 import os
 import subprocess
 import tempfile
@@ -16,26 +15,39 @@ class RuntimeCliTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--model-dir", result.stdout)
+        self.assertIn("--prompt", result.stdout)
+        self.assertNotIn("--input", result.stdout)
 
-    def test_unknown_input_format_is_rejected(self):
+    def test_invalid_generation_options_are_rejected(self):
         with tempfile.TemporaryDirectory() as root:
-            request = Path(root) / "input.json"
-            request.write_text(json.dumps({"format": "wrong", "version": 1}))
-            result = subprocess.run(
-                [
-                    os.environ["SD15_RUNTIME"],
-                    "--model-dir",
-                    root,
-                    "--input",
-                    str(request),
-                    "--output",
-                    str(Path(root) / "image.png"),
-                ],
-                capture_output=True,
-                text=True,
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("Unsupported inference input", result.stderr)
+            for flag, value, message in [
+                ("--seed", "-1", "unsigned 32-bit"),
+                ("--seed", "4294967296", "unsigned 32-bit"),
+                ("--seed", "42junk", "unsigned 32-bit"),
+                ("--steps", "0", "steps must"),
+                ("--steps", "1000", "steps must"),
+                ("--guidance", "nan", "finite"),
+                ("--guidance", "7.5junk", "finite"),
+                ("--input", "old.json", "Unknown option"),
+            ]:
+                with self.subTest(flag=flag, value=value):
+                    result = subprocess.run(
+                        [
+                            os.environ["SD15_RUNTIME"],
+                            "--model-dir",
+                            root,
+                            "--prompt",
+                            "a cat",
+                            "--output",
+                            str(Path(root) / "image.png"),
+                            flag,
+                            value,
+                        ],
+                        capture_output=True,
+                        text=True,
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(message, result.stderr)
             self.assertFalse((Path(root) / "image.png").exists())
 
 

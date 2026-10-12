@@ -24,7 +24,7 @@ template <class Function> void rejects(Function function) {
 int main() {
     try {
         using namespace sd15;
-        SchedulerConfig config;
+        detail::SchedulerConfig config;
         const auto times = detail::timesteps(config, 20);
         require(times.size() == 20 && times.front() == 951 && times.back() == 1);
         rejects([&] { detail::timesteps(config, 0); });
@@ -42,16 +42,25 @@ int main() {
         require(std::abs(latent[0] - 1.1339746f) < 1e-6f);
         rejects([&] { detail::ddim_step(latent, {}, {0.0f}, 1, 0.25f, 1); });
         GenerateOptions options;
-        options.model_dir = "model";
-        options.tokens.resize(kSequenceLength, 49407);
-        options.negative_tokens = options.tokens;
-        options.initial_latent.resize(kLatentElements);
+        options.prompt = "a cat";
         detail::validate(options);
-        options.tokens[0] = kVocabularySize;
+        options.steps = 0;
         rejects([&] { detail::validate(options); });
-        options.tokens[0] = 49406;
-        options.initial_latent[0] = std::numeric_limits<float>::quiet_NaN();
+        options.steps = 20;
+        options.guidance = std::numeric_limits<float>::quiet_NaN();
         rejects([&] { detail::validate(options); });
+        const auto noise = detail::initial_noise(42);
+        require(noise.size() == kLatentElements);
+        require(noise == detail::initial_noise(42));
+        require(noise != detail::initial_noise(123));
+        double mean = 0, square = 0;
+        for (const auto value : noise) {
+            require(std::isfinite(value));
+            mean += value;
+            square += value * value;
+        }
+        require(std::abs(mean / noise.size()) < 0.05);
+        require(std::abs(square / noise.size() - 1.0) < 0.1);
         std::vector<float> decoded(3 * kImageSize * kImageSize);
         decoded[0] = -2;
         decoded[kImageSize * kImageSize] = 0;
