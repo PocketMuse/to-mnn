@@ -106,6 +106,8 @@ const auto image = runtime.generate(request, [](const std::string& stage, int st
 * C++ `mt19937` + `normal_distribution<float>(0, 1)`로 float 16,384개 생성
 * 동일 빌드·실행 환경의 고정 seed 재현을 검사. 기존 NumPy seed 이미지 및 Windows/Android 간 비트 일치는 보장하지 않음
 
+> prompt 16KiB·tokenizer 파일당 4MiB·내부 scheduler 검증의 학습 timestep 10,000 상한은 모델 규격이나 실측에 따른 값이 아닌 임시 방어 제한이며, 추후 필요에 따라 조정 가능.
+
 공식 참고:
 
 * [MNN 3.6.1 StableDiffusion](https://github.com/alibaba/MNN/blob/3.6.1/transformers/diffusion/engine/src/stable_diffusion.cpp): 클래스 수명·난수·모델 순차 해제
