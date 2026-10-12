@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <random>
 #include <stdexcept>
 
@@ -37,10 +38,25 @@ std::vector<int> timesteps(const SchedulerConfig& config, int steps) {
 }
 
 void validate(const GenerateOptions& options) {
+    if (options.seed > std::numeric_limits<uint32_t>::max()) {
+        throw std::invalid_argument("seed must be negative or in [0, 4294967295]");
+    }
     timesteps(SchedulerConfig{}, options.steps);
     if (!std::isfinite(options.guidance)) {
         throw std::invalid_argument("Guidance must be finite");
     }
+}
+
+uint32_t resolve_seed(int64_t seed) {
+    if (seed > std::numeric_limits<uint32_t>::max()) {
+        throw std::invalid_argument("seed must be negative or in [0, 4294967295]");
+    }
+    if (seed >= 0) {
+        return static_cast<uint32_t>(seed);
+    }
+    std::random_device source;
+    std::uniform_int_distribution<uint32_t> distribution;
+    return distribution(source);
 }
 
 std::vector<float> initial_noise(uint32_t seed) {

@@ -54,12 +54,12 @@ cp "$cache/snapshots/$revision/tokenizer/"{vocab.json,merges.txt} \
 ./build/windows-runtime/cli/sd15-infer.exe \
   --model-dir artifacts/mnn-cpp-hqq-b128-manual \
   --prompt "a photo of a cat sitting on a wooden table, natural light" \
-  --seed 42 --steps 20 --guidance 7.5 \
+  --steps 20 --guidance 7.5 \
   --output img/cat-native-runtime.png
 ```
 
 * 별도 tokenizer 위치는 `--tokenizer-dir DIR`, 음 프롬프트는 `--negative-prompt TEXT`
-* seed는 0~4294967295의 정수, 기본 42. 공식 예제의 음수 seed 방식은 제공하지 않음
+* seed는 signed 64-bit 정수, 기본 -1. 음수이면 요청마다 임의의 seed를 선택하고, 0~4294967295이면 그대로 사용. 그보다 큰 양수는 거부
 * 단계별 진행·전체 시간·seed를 출력하고 PNG 저장. 기존 출력 파일은 거부
 * prompt·seed를 직접 전달하며, 사전 생성한 token IDs·latent JSON은 사용하지 않음
 * Windows CLI는 Unicode 명령행을 UTF-8 prompt로 변환. MNN 모델 경로는 현재 ASCII 경로 사용
@@ -76,7 +76,7 @@ sd15::Sd15Runtime runtime(config);
 sd15::GenerateOptions request;
 request.prompt = "a photo of a cat";
 request.negative_prompt = "blurry";
-request.seed = 42;
+request.seed = -1; // 생략해도 랜덤. 재현할 때는 image.seed를 지정
 request.steps = 20;
 request.guidance = 7.5f;
 const auto image = runtime.generate(request, [](const std::string& stage, int step, int total) {
@@ -91,7 +91,7 @@ const auto image = runtime.generate(request, [](const std::string& stage, int st
 * 성공·모델 오류·콜백 예외 모두 RAII로 모델 자원을 해제. 예외 후 같은 인스턴스에서 다시 생성 가능
 * 생성 중 객체 파괴·콜백에서 객체 파괴는 금지. 호출자는 완료까지 Runtime 수명을 보장
 * 진행 단계는 `text_encoder`, `unet`, `denoising`, `vae_decoder`. 로딩 단계에서는 step=0
-* 결과는 `width`, `height`, HWC 순서 RGB8 `rgb`. PNG 저장은 CLI 담당
+* 결과는 실제 사용한 `seed`, `width`, `height`, HWC 순서 RGB8 `rgb`. 재현하려면 결과의 `seed`를 다음 요청에 지정. PNG 저장은 CLI 담당
 * 입력·MNN·콜백 오류는 C++ 예외로 전달. MNN 입출력 name·shape·dtype와 출력 NaN/Inf 검사
 * UNet 실행마다 sample·timestep·context를 다시 복사. 입력 버퍼 보존을 가정하지 않음
 

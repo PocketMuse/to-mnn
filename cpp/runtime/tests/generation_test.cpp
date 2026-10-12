@@ -34,7 +34,7 @@ int main(int argc, char** argv) {
         }
         require(rejected, "Invalid generation accepted");
 
-        const auto original = request;
+        auto original = request;
         const auto first = runtime.generate(request, [&](const std::string& stage, int, int) {
             if (stage == "text_encoder") {
                 request.seed = 123;
@@ -49,6 +49,8 @@ int main(int argc, char** argv) {
             }
         });
         require(first.rgb.size() == 3 * sd15::kImageSize * sd15::kImageSize, "Unexpected image size");
+        // 기본 음수 seed로 생성한 결과를 실제 seed로 재현한다.
+        original.seed = first.seed;
         bool interrupted = false;
         try {
             runtime.generate(original, [](const std::string& stage, int, int) {
@@ -62,8 +64,11 @@ int main(int argc, char** argv) {
         }
         require(interrupted, "Callback exception was lost");
         const auto repeated = runtime.generate(original);
+        require(repeated.seed == first.seed, "Actual seed was not preserved");
         require(first.rgb == repeated.rgb, "Repeated generation or exception recovery changed image");
+        request.seed = first.seed == 123 ? 124 : 123;
         const auto changed = runtime.generate(request);
+        require(changed.seed == request.seed, "Explicit seed was not preserved");
         require(first.rgb != changed.rgb, "Different seed did not change image");
         std::cout << "Repeated generation, request snapshot, reentry and failure recovery passed\n";
     }

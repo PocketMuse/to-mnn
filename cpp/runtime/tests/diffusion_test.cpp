@@ -42,6 +42,25 @@ int main() {
         require(std::abs(latent[0] - 1.1339746f) < 1e-6f);
         rejects([&] { detail::ddim_step(latent, {}, {0.0f}, 1, 0.25f, 1); });
         GenerateOptions options;
+        require(options.seed == -1);
+        require(detail::resolve_seed(0) == 0);
+        require(detail::resolve_seed(42) == 42);
+        require(detail::resolve_seed(4294967295LL) == std::numeric_limits<uint32_t>::max());
+        rejects([&] { detail::resolve_seed(4294967296LL); });
+        // 음수 경로의 실제 seed로 같은 노이즈를 다시 생성할 수 있다.
+        for (const int64_t value : std::vector<int64_t>{-1, -42, std::numeric_limits<int64_t>::min()}) {
+            const auto seed = detail::resolve_seed(value);
+            require(detail::initial_noise(seed) == detail::initial_noise(detail::resolve_seed(seed)));
+        }
+        const auto first_seed = detail::resolve_seed(-1);
+        bool varied = false;
+        for (int i = 0; i < 8; ++i) {
+            varied |= detail::resolve_seed(-1) != first_seed;
+        }
+        require(varied);
+        options.seed = 4294967296LL;
+        rejects([&] { detail::validate(options); });
+        options.seed = -1;
         options.prompt = "a cat";
         detail::validate(options);
         options.steps = 0;

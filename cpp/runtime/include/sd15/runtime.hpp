@@ -16,7 +16,8 @@ constexpr int kImageSize = 512;
 struct GenerateOptions {
     std::string prompt;
     std::string negative_prompt;
-    uint32_t seed = 42;
+    // 음수는 생성 요청마다 임의의 uint32 seed를 선택한다.
+    int64_t seed = -1;
     int steps = 20;
     float guidance = 7.5f;
 };
@@ -28,6 +29,7 @@ struct RuntimeOptions {
 };
 
 struct Image {
+    uint32_t seed = 0; // 실제 생성에 사용한 seed.
     int width = kImageSize;
     int height = kImageSize;
     std::vector<uint8_t> rgb;

@@ -147,6 +147,7 @@ Image Sd15Runtime::generate(const GenerateOptions& request, const InferenceProgr
     // 콜백에서 호출자가 원래 요청을 바꾸어도 이번 생성의 설정은 유지한다.
     const auto options = request;
     detail::validate(options);
+    const auto seed = detail::resolve_seed(options.seed);
     const auto& root = impl_->root;
     const auto tokens = impl_->tokenizer.encode(options.prompt);
     const auto negative_tokens = impl_->tokenizer.encode(options.negative_prompt);
@@ -168,7 +169,7 @@ Image Sd15Runtime::generate(const GenerateOptions& request, const InferenceProgr
         encoder.input("input_ids", {1, kSequenceLength}, tokens);
         context = encoder.run("last_hidden_state", kContextShape);
     }
-    auto latent = detail::initial_noise(options.seed);
+    auto latent = detail::initial_noise(seed);
     {
         notify("unet");
         Model unet(root / "unet.mnn", 3);
@@ -199,7 +200,9 @@ Image Sd15Runtime::generate(const GenerateOptions& request, const InferenceProgr
     }
     Model decoder(root / "vae_decoder.mnn", 1);
     decoder.input("latent_sample", kLatentShape, latent);
-    return detail::pixels(decoder.run("sample", {1, 3, kImageSize, kImageSize}));
+    auto image = detail::pixels(decoder.run("sample", {1, 3, kImageSize, kImageSize}));
+    image.seed = seed;
+    return image;
 }
 
 } // namespace sd15

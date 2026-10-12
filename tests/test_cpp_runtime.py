@@ -21,9 +21,9 @@ class RuntimeCliTest(unittest.TestCase):
     def test_invalid_generation_options_are_rejected(self):
         with tempfile.TemporaryDirectory() as root:
             for flag, value, message in [
-                ("--seed", "-1", "unsigned 32-bit"),
-                ("--seed", "4294967296", "unsigned 32-bit"),
-                ("--seed", "42junk", "unsigned 32-bit"),
+                ("--seed", "4294967296", "seed must"),
+                ("--seed", "42junk", "seed must"),
+                ("--seed", "-9223372036854775809", "seed must"),
                 ("--steps", "0", "steps must"),
                 ("--steps", "1000", "steps must"),
                 ("--guidance", "nan", "finite"),
@@ -49,6 +49,16 @@ class RuntimeCliTest(unittest.TestCase):
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn(message, result.stderr)
             self.assertFalse((Path(root) / "image.png").exists())
+
+    def test_valid_seeds_pass_parsing(self):
+        for seed in [None, "-1", "-42", "-9223372036854775808", "0", "4294967295"]:
+            with self.subTest(seed=seed):
+                args = [os.environ["SD15_RUNTIME"]]
+                if seed is not None:
+                    args += ["--seed", seed]
+                result = subprocess.run(args, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Require --model-dir", result.stderr)
 
 
 if __name__ == "__main__":

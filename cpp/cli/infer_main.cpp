@@ -9,12 +9,23 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #ifdef _WIN32
 #include <Windows.h>
 #endif
 
 namespace {
+
+int64_t seed_option(const std::string& value) {
+    int64_t result = 0;
+    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), result);
+    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
+        result > std::numeric_limits<uint32_t>::max()) {
+        throw std::invalid_argument("seed must be negative or in [0, 4294967295]: " + value);
+    }
+    return result;
+}
 
 uint32_t unsigned_option(const std::string& value) {
     uint32_t result = 0;
@@ -35,8 +46,9 @@ int run(const std::vector<std::string>& args) {
             const auto& flag = args[i];
             if (flag == "--help") {
                 std::cout << "Usage: sd15-infer --model-dir DIR --prompt TEXT --output image.png\n"
-                             "  [--tokenizer-dir DIR] [--negative-prompt TEXT] [--seed UINT32]\n"
-                             "  [--steps 1..999] [--guidance FLOAT]\n";
+                             "  [--tokenizer-dir DIR] [--negative-prompt TEXT] [--seed INT64]\n"
+                             "  [--steps 1..999] [--guidance FLOAT]\n"
+                             "  seed: default -1; negative selects a random seed, otherwise 0..4294967295\n";
                 return 0;
             }
             if (i + 1 == args.size()) {
@@ -57,7 +69,7 @@ int run(const std::vector<std::string>& args) {
                 options.negative_prompt = value;
             }
             else if (flag == "--seed") {
-                options.seed = unsigned_option(value);
+                options.seed = seed_option(value);
             }
             else if (flag == "--steps") {
                 const auto steps = unsigned_option(value);
@@ -113,7 +125,7 @@ int run(const std::vector<std::string>& args) {
         }
         const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         std::cout << "Saved " << output.u8string() << " (" << image.width << "x" << image.height << "), " << elapsed
-                  << "s, seed=" << options.seed << ", OpenCL high/buffer/tuning-none\n";
+                  << "s, seed=" << image.seed << ", OpenCL high/buffer/tuning-none\n";
     }
     catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

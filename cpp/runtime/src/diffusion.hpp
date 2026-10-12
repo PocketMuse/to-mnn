@@ -13,6 +13,7 @@ struct SchedulerConfig {
 };
 
 void validate(const GenerateOptions& options);
+uint32_t resolve_seed(int64_t seed);
 std::vector<float> initial_noise(uint32_t seed);
 std::vector<float> alphas(const SchedulerConfig& config);
 std::vector<int> timesteps(const SchedulerConfig& config, int steps);
