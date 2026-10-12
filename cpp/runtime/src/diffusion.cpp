@@ -121,11 +121,7 @@ Image pixels(const std::vector<float>& decoded) {
                 throw std::runtime_error("Non-finite decoded image");
             }
             const float scaled = std::clamp(value / 2 + 0.5f, 0.0f, 1.0f) * 255;
-            // NumPy rint와 같은 ties-to-even 반올림.
-            const int lower = static_cast<int>(scaled);
-            const float fraction = scaled - lower;
-            image.rgb[3 * i + channel] =
-                static_cast<uint8_t>(lower + (fraction > 0.5f || (fraction == 0.5f && lower % 2 != 0) ? 1 : 0));
+            image.rgb[3 * i + channel] = static_cast<uint8_t>(std::round(scaled));
         }
     }
     return image;

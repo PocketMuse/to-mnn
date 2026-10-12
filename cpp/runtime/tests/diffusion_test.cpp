@@ -84,8 +84,13 @@ int main() {
         decoded[0] = -2;
         decoded[kImageSize * kImageSize] = 0;
         decoded[2 * kImageSize * kImageSize] = 2;
+        // RGB8 값 128.25, 128.5, 128.75: .5는 위 정수로 반올림한다.
+        decoded[1] = 1.5f / 255;
+        decoded[2] = 2.0f / 255;
+        decoded[3] = 2.5f / 255;
         const auto image = detail::pixels(decoded);
         require(image.rgb[0] == 0 && image.rgb[1] == 128 && image.rgb[2] == 255);
+        require(image.rgb[3] == 128 && image.rgb[6] == 129 && image.rgb[9] == 129);
         std::cout << "Runtime math and validation passed\n";
     }
     catch (const std::exception& error) {
