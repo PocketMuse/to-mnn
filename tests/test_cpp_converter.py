@@ -10,6 +10,26 @@ from pathlib import Path
 
 
 class ConverterTest(unittest.TestCase):
+    def test_cli_help(self):
+        result = subprocess.run(
+            [os.environ.get("SD15_CONVERTER", "/usr/local/bin/sd15-convert"), "--help"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for option in ("--checkpoint", "--template-dir", "--output", "--threads"):
+            self.assertIn(option, result.stdout)
+
+    def test_cli_rejects_invalid_arguments_before_conversion(self):
+        executable = os.environ.get("SD15_CONVERTER", "/usr/local/bin/sd15-convert")
+        for args in ([], ["--checkpoint"], ["--unknown", "x"], ["--threads", "2junk"]):
+            with self.subTest(args=args):
+                result = subprocess.run(
+                    [executable, *args], capture_output=True, text=True
+                )
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertFalse(self.output.exists())
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

@@ -1,4 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
+option(SD15_BUILD_CLI "Build command-line tools" ON)
+if(SD15_BUILD_CLI)
+    list(APPEND VCPKG_MANIFEST_FEATURES cli)
+endif()
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     if(NOT DEFINED ENV{VCPKG_ROOT} OR "$ENV{VCPKG_ROOT}" STREQUAL "")
         message(FATAL_ERROR "Set VCPKG_ROOT to your existing vcpkg installation")
@@ -10,7 +14,6 @@ project(to_mnn LANGUAGES CXX)
 
 option(SD15_BUILD_CONVERTER "Build the converter" ON)
 option(SD15_BUILD_RUNTIME "Build the image runtime" OFF)
-option(SD15_BUILD_CLI "Build command-line tools" ON)
 
 include(CTest)
 if(SD15_BUILD_CONVERTER)

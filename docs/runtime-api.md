@@ -16,7 +16,7 @@
 
 * 기존 [MNN 빌드](../README.md#3-mnnruntime-빌드)를 먼저 실행
 * MSVC x64, Windows SDK, CMake, Ninja 필요. 프로젝트 루트의 Git Bash에서 실행
-* 설치된 vcpkg의 `VCPKG_ROOT` 환경변수 필요. JSON은 configure 시 manifest 기준으로 준비
+* 설치된 vcpkg의 `VCPKG_ROOT` 환경변수 필요. JSON·CLI11은 configure 시 manifest 기준으로 준비
 * vcpkg 도입 전의 빌드 폴더는 기존 CMake 캐시를 초기화한 뒤 실행
 
 ```bash
@@ -64,7 +64,7 @@ cp "$cache/snapshots/$revision/tokenizer/"{vocab.json,merges.txt} \
 * seed는 signed 64-bit 정수, 기본 -1. 음수이면 요청마다 임의의 seed를 선택하고, 0~4294967295이면 그대로 사용. 그보다 큰 양수는 거부
 * 단계별 진행·전체 시간·seed를 출력하고 PNG 저장. 기존 출력 파일은 거부
 * prompt·seed를 직접 전달하며, 사전 생성한 token IDs·latent JSON은 사용하지 않음
-* Windows CLI는 Unicode 명령행을 UTF-8 prompt로 변환. MNN 모델 경로는 현재 ASCII 경로 사용
+* CLI11로 옵션을 파싱하며 `--help`로 사용법 확인. Windows Unicode 명령행의 UTF-8 변환도 CLI11이 처리. MNN 모델 경로는 현재 ASCII 경로 사용
 
 ## 4. C++ API와 수명
 

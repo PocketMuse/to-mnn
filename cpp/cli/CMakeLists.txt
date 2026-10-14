@@ -1,6 +1,8 @@
+find_package(CLI11 CONFIG REQUIRED)
+
 if(SD15_BUILD_CONVERTER)
     add_executable(sd15-convert convert_main.cpp)
-    target_link_libraries(sd15-convert PRIVATE sd15_converter)
+    target_link_libraries(sd15-convert PRIVATE sd15_converter CLI11::CLI11)
 
     if(BUILD_TESTING)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -12,7 +14,7 @@ endif()
 
 if(SD15_BUILD_RUNTIME)
     add_executable(sd15-infer infer_main.cpp)
-    target_link_libraries(sd15-infer PRIVATE sd15_runtime)
+    target_link_libraries(sd15-infer PRIVATE sd15_runtime CLI11::CLI11)
     target_include_directories(sd15-infer SYSTEM PRIVATE
         "${MNN_SOURCE_DIR}/3rd_party/imageHelper")
     if(MSVC)

@@ -21,14 +21,15 @@ class RuntimeCliTest(unittest.TestCase):
     def test_invalid_generation_options_are_rejected(self):
         with tempfile.TemporaryDirectory() as root:
             for flag, value, message in [
-                ("--seed", "4294967296", "seed must"),
-                ("--seed", "42junk", "seed must"),
-                ("--seed", "-9223372036854775809", "seed must"),
-                ("--steps", "0", "steps must"),
-                ("--steps", "1000", "steps must"),
+                ("--seed", "4294967296", "--seed"),
+                ("--seed", "42junk", "--seed"),
+                ("--seed", "-9223372036854775809", "--seed"),
+                ("--steps", "0", "--steps"),
+                ("--steps", "1000", "--steps"),
                 ("--guidance", "nan", "finite"),
-                ("--guidance", "7.5junk", "finite"),
-                ("--input", "old.json", "Unknown option"),
+                ("--guidance", "inf", "finite"),
+                ("--guidance", "7.5junk", "--guidance"),
+                ("--input", "old.json", "--input"),
             ]:
                 with self.subTest(flag=flag, value=value):
                     result = subprocess.run(
@@ -58,7 +59,54 @@ class RuntimeCliTest(unittest.TestCase):
                     args += ["--seed", seed]
                 result = subprocess.run(args, capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("Require --model-dir", result.stderr)
+                self.assertIn("--model-dir", result.stderr)
+
+    def test_empty_and_unicode_prompts_pass_parsing(self):
+        with tempfile.TemporaryDirectory() as root:
+            for prompt in ("", "한글 고양이 🐈", "--a literal prompt"):
+                with self.subTest(prompt=prompt):
+                    result = subprocess.run(
+                        [
+                            os.environ["SD15_RUNTIME"],
+                            "--model-dir",
+                            root,
+                            "--prompt",
+                            prompt,
+                            "--negative-prompt",
+                            "",
+                            "--output",
+                            str(Path(root) / "결과.png"),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                    )
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn("Missing model:", result.stderr)
+            self.assertFalse((Path(root) / "결과.png").exists())
+
+    def test_existing_unicode_output_is_preserved(self):
+        with tempfile.TemporaryDirectory() as root:
+            output = Path(root) / "결과.png"
+            output.write_bytes(b"keep")
+            result = subprocess.run(
+                [
+                    os.environ["SD15_RUNTIME"],
+                    "--model-dir",
+                    root,
+                    "--prompt",
+                    "",
+                    "--output",
+                    str(output),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("Output already exists:", result.stderr)
+            self.assertIn("결과.png", result.stderr)
+            self.assertEqual(output.read_bytes(), b"keep")
 
 
 if __name__ == "__main__":

@@ -4,13 +4,15 @@
 * UNet: W8 + HQQ + Block128, CLIP/VAE: FP16
 * Docker Compose 2.22 이상이 필요하며 OpenCL 추론은 Windows 네이티브 환경에서 실행
 
-C++ 의존성은 `cpp/vcpkg.json`의 baseline으로 고정한다. 현재 대상은 기존 JSON 라이브러리 하나다.
+C++ 의존성은 `cpp/vcpkg.json`의 baseline으로 고정한다. JSON은 nlohmann-json, CLI 파싱은 CLI11을 사용한다.
 
 * Windows는 설치된 vcpkg를 `VCPKG_ROOT` 환경변수로 연결한다. 개인 절대경로를 설정 파일에 기록하지 않는다.
 * CMake configure 시 필요한 패키지를 빌드 폴더의 `vcpkg_installed`에 준비한다. 최초 실행에는 다운로드가 필요할 수 있다.
 * 기존 vcpkg 미사용 빌드 폴더는 CMake 캐시를 초기화하거나 새 빌드 폴더를 사용한다.
 * Docker는 같은 baseline의 Linux vcpkg를 이미지 내부에 준비한다. PC의 vcpkg 설치는 변경하지 않는다.
-* MNNRuntime의 Git 고정 빌드, CLI 파싱과 PNG 라이브러리는 기존 방식을 유지한다.
+* CLI11은 `SD15_BUILD_CLI=ON`일 때 manifest의 `cli` 기능으로 선택하며 CLI 실행 파일에만 연결한다.
+* 두 CLI는 `--help`로 옵션과 기본값을 표시한다. 필수 옵션·숫자 형식 오류는 CLI11이 검사한다.
+* MNNRuntime의 Git 고정 빌드와 PNG 라이브러리는 기존 방식을 유지한다.
 
 모델 경로:
 

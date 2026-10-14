@@ -2,5 +2,11 @@
   "name": "to-mnn",
   "version-string": "0.1.0",
   "builtin-baseline": "e456309491fd875487bf02b8a0dca76c1b1b00cc",
-  "dependencies": ["nlohmann-json"]
+  "dependencies": ["nlohmann-json"],
+  "features": {
+    "cli": {
+      "description": "Command-line argument parsing",
+      "dependencies": ["cli11"]
+    }
+  }
 }

@@ -1,58 +1,27 @@
 #include "sd15/converter.hpp"
 
-#include <charconv>
+#include <CLI/CLI.hpp>
 #include <cstdio>
 #include <string>
 
 int main(int argc, char** argv) {
     sd15::ConvertOptions options;
-    for (int i = 1; i < argc; i += 2) {
-        if (i + 1 >= argc) {
-            std::fprintf(stderr, "Expected a value for %s\n", argv[i]);
-            return 2;
-        }
-        const std::string flag = argv[i];
-        const std::string value = argv[i + 1];
-        if (flag == "--checkpoint") {
-            options.checkpoint = value;
-        }
-        else if (flag == "--template-dir") {
-            options.template_dir = value;
-        }
-        else if (flag == "--output") {
-            options.output_dir = value;
-        }
-        else if (flag == "--chunk-bytes") {
-            const auto result = std::from_chars(value.data(), value.data() + value.size(), options.chunk_bytes);
-            if (result.ec != std::errc{} || result.ptr != value.data() + value.size()) {
-                std::fprintf(stderr, "Invalid chunk size\n");
-                return 2;
-            }
-        }
-        else if (flag == "--threads") {
-            const auto result = std::from_chars(value.data(), value.data() + value.size(), options.thread_count);
-            if (result.ec != std::errc{} || result.ptr != value.data() + value.size()) {
-                std::fprintf(stderr, "Invalid thread count\n");
-                return 2;
-            }
-        }
-        else if (flag == "--hqq-iterations") {
-            const auto result = std::from_chars(value.data(), value.data() + value.size(), options.hqq_iterations);
-            if (result.ec != std::errc{} || result.ptr != value.data() + value.size()) {
-                std::fprintf(stderr, "Invalid HQQ iterations\n");
-                return 2;
-            }
-        }
-        else {
-            std::fprintf(stderr, "Unknown option: %s\n", argv[i]);
-            return 2;
-        }
+    CLI::App app{"Convert SD1.5 safetensors using a graph template"};
+    const CLI::Validator nonempty(
+        [](const std::string& value) { return value.empty() ? "Value must not be empty" : ""; }, "NONEMPTY");
+    app.option_defaults()->take_last();
+    app.add_option("--checkpoint", options.checkpoint, "Safetensors file")->required()->check(nonempty);
+    app.add_option("--template-dir", options.template_dir, "Template directory")->required()->check(nonempty);
+    app.add_option("--output", options.output_dir, "New output directory")->required()->check(nonempty);
+    app.add_option("--chunk-bytes", options.chunk_bytes, "Input buffer bytes")->capture_default_str();
+    app.add_option("--threads", options.thread_count, "HQQ threads (1..8)")->capture_default_str();
+    app.add_option("--hqq-iterations", options.hqq_iterations, "HQQ iterations (0..20)")->capture_default_str();
+    try {
+        app.parse(argc, argv);
     }
-    if (options.checkpoint.empty() || options.template_dir.empty() || options.output_dir.empty()) {
-        std::fprintf(
-            stderr,
-            "Usage: sd15-convert --checkpoint FILE --template-dir DIR --output DIR [--chunk-bytes N] [--hqq-iterations N] [--threads N]\n");
-        return 2;
+    catch (const CLI::ParseError& error) {
+        app.exit(error);
+        return error.get_exit_code() == 0 ? 0 : 2;
     }
     sd15::CancellationToken cancellation;
     const auto result = sd15::convert(options, {}, cancellation);
