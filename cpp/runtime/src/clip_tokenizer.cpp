@@ -2,12 +2,17 @@
 #include "sd15/runtime.hpp"
 
 #include <nlohmann/json.hpp>
-#include <unicode.hpp>
+#include <unicode/locid.h>
+#include <unicode/normalizer2.h>
+#include <unicode/regex.h>
+#include <unicode/uchar.h>
+#include <unicode/utf8.h>
 
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 
@@ -24,10 +29,16 @@ constexpr uintmax_t kMaxAssetBytes = 4 * 1024 * 1024;
 constexpr char kTokenPattern[] =
     R"(<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]|[^\s\p{L}\p{N}]+)";
 
-std::string utf8(int32_t codepoint) {
-    char buffer[4];
-    const auto length = MNN::Unicode::utf8_encode(codepoint, buffer);
-    return {buffer, static_cast<std::size_t>(length)};
+void check_unicode(UErrorCode status) {
+    if (U_FAILURE(status)) {
+        throw std::runtime_error(std::string("ICU: ") + u_errorName(status));
+    }
+}
+
+std::string utf8(UChar32 codepoint) {
+    std::string result;
+    icu::UnicodeString(codepoint).toUTF8String(result);
+    return result;
 }
 
 std::ifstream open_asset(const std::filesystem::path& path) {
@@ -42,26 +53,41 @@ std::ifstream open_asset(const std::filesystem::path& path) {
     return stream;
 }
 
-std::string normalize(const std::string& prompt) {
+icu::UnicodeString normalize(const std::string& prompt) {
     if (prompt.size() > kMaxPromptBytes) {
         throw std::invalid_argument("Prompt exceeds 16384 UTF-8 bytes");
     }
-    std::string result;
-    for (std::size_t i = 0; i < prompt.size();) {
-        int32_t codepoint;
-        const auto* bytes = reinterpret_cast<const uint8_t*>(prompt.data() + i);
-        const int length = MNN::Unicode::utf8_decode(bytes, prompt.size() - i, &codepoint);
-        if (length == 1 && bytes[0] >= 0x80) {
+    const auto length = static_cast<int32_t>(prompt.size());
+    for (int32_t i = 0; i < length;) {
+        UChar32 codepoint;
+        U8_NEXT(prompt.data(), i, length, codepoint);
+        if (codepoint < 0) {
             throw std::invalid_argument("Prompt must be valid UTF-8");
         }
-        i += length;
-        if (MNN::Unicode::is_whitespace(codepoint)) {
-            if (!result.empty() && result.back() != ' ') {
-                result += ' ';
+    }
+    UErrorCode status = U_ZERO_ERROR;
+    const auto* nfc = icu::Normalizer2::getNFCInstance(status);
+    check_unicode(status);
+    icu::UnicodeString normalized;
+    nfc->normalize(icu::UnicodeString::fromUTF8(prompt), normalized, status);
+    check_unicode(status);
+
+    icu::UnicodeString result;
+    bool whitespace = false;
+    for (int32_t i = 0; i < normalized.length();) {
+        const UChar32 codepoint = normalized.char32At(i);
+        i += U16_LENGTH(codepoint);
+        if (u_isUWhiteSpace(codepoint)) {
+            if (!whitespace) {
+                result.append(static_cast<UChar32>(' '));
             }
+            whitespace = true;
             continue;
         }
-        result += utf8(MNN::Unicode::to_lower(codepoint));
+        whitespace = false;
+        // HF tokenizers는 문맥 없이 문자별 full lowercase를 적용한다. Case folding과 다르다.
+        icu::UnicodeString letter(codepoint);
+        result.append(letter.toLower(icu::Locale::getRoot()));
     }
     return result;
 }
@@ -125,11 +151,24 @@ ClipTokenizer::ClipTokenizer(const std::string& directory) {
 
 std::vector<int32_t> ClipTokenizer::encode(const std::string& prompt) const {
     std::vector<int32_t> result{kBos};
-    const auto tokens = MNN::Unicode::regex_split(normalize(prompt), kTokenPattern, true, "Removed");
-    for (const auto& token : tokens) {
+    const auto text = normalize(prompt);
+    static const auto pattern = [] {
+        UErrorCode status = U_ZERO_ERROR;
+        std::unique_ptr<icu::RegexPattern> compiled(
+            icu::RegexPattern::compile(icu::UnicodeString::fromUTF8(kTokenPattern), 0, status));
+        check_unicode(status);
+        return compiled;
+    }();
+    UErrorCode status = U_ZERO_ERROR;
+    std::unique_ptr<icu::RegexMatcher> matcher(pattern->matcher(text, status));
+    check_unicode(status);
+    while (matcher->find(status)) {
         if (result.size() >= kSequenceLength - 1) {
             break;
         }
+        std::string token;
+        matcher->group(status).toUTF8String(token);
+        check_unicode(status);
         if (token == kBosText || token == kEosText) {
             result.push_back(vocabulary_.at(token));
             continue;
@@ -165,6 +204,7 @@ std::vector<int32_t> ClipTokenizer::encode(const std::string& prompt) const {
             result.push_back(vocabulary_.at(piece));
         }
     }
+    check_unicode(status);
     result.push_back(kEos);
     result.resize(kSequenceLength, kEos);
     return result;

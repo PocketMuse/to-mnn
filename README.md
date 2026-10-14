@@ -11,6 +11,7 @@ C++ 의존성은 `cpp/vcpkg.json`의 baseline으로 고정한다. JSON은 nlohma
 * 기존 vcpkg 미사용 빌드 폴더는 CMake 캐시를 초기화하거나 새 빌드 폴더를 사용한다.
 * Docker는 같은 baseline의 Linux vcpkg를 이미지 내부에 준비한다. PC의 vcpkg 설치는 변경하지 않는다.
 * CLI11은 `SD15_BUILD_CLI=ON`일 때 manifest의 `cli` 기능으로 선택하며 CLI 실행 파일에만 연결한다.
+* Runtime의 Unicode 처리는 ICU를 사용한다. `SD15_BUILD_RUNTIME=ON`일 때만 manifest의 `runtime` 기능을 선택한다.
 * 두 CLI는 `--help`로 옵션과 기본값을 표시한다. 필수 옵션·숫자 형식 오류는 CLI11이 검사한다.
 * MNNRuntime의 Git 고정 빌드와 PNG 라이브러리는 기존 방식을 유지한다.
 

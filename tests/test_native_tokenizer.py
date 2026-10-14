@@ -27,6 +27,18 @@ class NativeTokenizerTest(unittest.TestCase):
             "<|startoftext|>a cat<|endoftext|>",
             "한글 고양이 猫",
             "Café, déjà vu! 🐈",
+            "Cafe\u0301",
+            "\u1100\u1161",
+            "İstanbul",
+            "ΟΣ",
+            "ﬁsh",
+            "cat &amp; dog",
+            "a\u0327\u0301",
+            "a\u0085cat",
+            "a\u2028cat",
+            "a\u2029cat",
+            "STRAẞE",
+            "ος",
         ]:
             with self.subTest(prompt=prompt[:80]):
                 result = subprocess.run(

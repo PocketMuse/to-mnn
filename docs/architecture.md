@@ -64,14 +64,14 @@ docs/                         # 정책·API·검증 기록
 
 ```text
 sd15-convert → sd15_converter → nlohmann_json, Threads
-sd15-infer → sd15_runtime → MNN, MNN Unicode 소스, nlohmann_json
+sd15-infer → sd15_runtime → MNN, ICU, nlohmann_json
 sd15-convert, sd15-infer → CLI11
 ```
 
 * Converter는 MNNConvert·MNN Runtime 없이 실행
-* JSON·CLI11은 `cpp/vcpkg.json`의 baseline으로 관리. CMake는 기존 `VCPKG_ROOT`를 사용하며 패키지는 빌드 폴더에 설치
+* JSON·CLI11·ICU·Catch2는 `cpp/vcpkg.json`의 baseline으로 관리. CMake는 기존 `VCPKG_ROOT`를 사용하며 패키지는 빌드 폴더에 설치
 * CLI11은 `SD15_BUILD_CLI=ON`일 때만 선택. Converter·Runtime 라이브러리에는 연결하지 않음
-* MNN은 기존 Git 고정 네이티브 빌드를 유지. Unicode 보조 소스는 같은 저장소에서 가져와 우리 Runtime 빌드에 포함. 둘 다 vcpkg로 관리하지 않음
+* MNN은 기존 Git 고정 네이티브 빌드를 유지하며 vcpkg로 관리하지 않음. 토크나이저의 Unicode 처리는 Runtime 전용 ICU 의존성으로 분리
 * CMake 선택: `SD15_BUILD_CONVERTER`(기본 ON), `SD15_BUILD_RUNTIME`(기본 OFF), `SD15_BUILD_CLI`(기본 ON)
 * 테스트는 `BUILD_TESTING`으로 선택. 기존 Docker Converter 빌드는 유지
 * C++ 테스트는 vcpkg의 Catch2를 사용. 순수 단위 테스트는 CTest에 케이스별로 등록하며 자원·임시 폴더가 필요한 통합 테스트는 기존 실행 경로를 유지

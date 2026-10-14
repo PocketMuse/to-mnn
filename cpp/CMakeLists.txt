@@ -1,4 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
+option(SD15_BUILD_RUNTIME "Build the image runtime" OFF)
+if(SD15_BUILD_RUNTIME)
+    list(APPEND VCPKG_MANIFEST_FEATURES runtime)
+endif()
 option(SD15_BUILD_CLI "Build command-line tools" ON)
 option(BUILD_TESTING "Build the testing tree" ON)
 if(BUILD_TESTING)
@@ -17,7 +21,6 @@ endif()
 project(to_mnn LANGUAGES CXX)
 
 option(SD15_BUILD_CONVERTER "Build the converter" ON)
-option(SD15_BUILD_RUNTIME "Build the image runtime" OFF)
 
 include(CTest)
 if(BUILD_TESTING)

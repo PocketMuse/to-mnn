@@ -16,7 +16,7 @@
 
 * 기존 [MNN 빌드](../README.md#3-mnnruntime-빌드)를 먼저 실행
 * MSVC x64, Windows SDK, CMake, Ninja 필요. 프로젝트 루트의 Git Bash에서 실행
-* 설치된 vcpkg의 `VCPKG_ROOT` 환경변수 필요. JSON·CLI11·테스트용 Catch2는 configure 시 manifest 기준으로 준비
+* 설치된 vcpkg의 `VCPKG_ROOT` 환경변수 필요. JSON·ICU·CLI11·테스트용 Catch2는 configure 시 manifest 기준으로 준비
 * vcpkg 도입 전의 빌드 폴더는 기존 CMake 캐시를 초기화한 뒤 실행
 
 ```bash
@@ -24,9 +24,9 @@ bash scripts/build-runtime.sh
 ```
 
 * 기존 `MNNRuntime/build/{MNN.dll,MNN.lib}`에 연결. MNN 자체는 재빌드하지 않음
-* 고정 MNN 소스의 Unicode 처리와 vcpkg의 JSON 헤더 사용. LLM·공식 diffusion 엔진은 빌드하지 않음
+* Unicode 정규화·문자 분류·소문자화·정규식은 vcpkg의 ICU 사용. MNN Unicode 보조 소스는 더 이상 우리 Runtime에 컴파일하지 않음
 * Converter는 끄고 Runtime·CLI·C++ 테스트만 빌드
-* 출력: `build/windows-runtime/cli/sd15-infer.exe`, 실행 파일 옆에 `MNN.dll` 복사
+* 출력: `build/windows-runtime/cli/sd15-infer.exe`, 실행 파일 옆에 `MNN.dll`과 vcpkg의 ICU DLL 배치. 실행 파일 배포 시 이 DLL들도 포함
 * C++ 테스트 실패 시 스크립트 실패. `BUILD_JOBS=4`로 빌드 병렬 수 조정 가능
 
 선택적 통합 테스트는 `SD15_TEST_TOKENIZER_DIR`, `SD15_TEST_MODEL_DIR` 환경변수로 빌드 스크립트에 자원 경로를 전달한다. 모델 검증은 Windows 네이티브 OpenCL에서 실행한다.
@@ -112,8 +112,11 @@ const auto image = runtime.generate(request, [](const std::string& stage, int st
 ## 5. 토큰화와 난수
 
 * CLIP byte BPE, 단어 끝 `</w>`, BOS 49406·EOS/padding 49407, 최대 77 tokens. 잘릴 때 마지막 EOS 보존
-* UTF-8 검사, Unicode 소문자화·공백 처리. 각 prompt는 최대 16KiB
-* NFC 조합 정규화·ftfy 보정·여러 문자로 확장되는 소문자 변환은 미지원. 모든 Unicode 입력의 Python 토큰 일치를 보장하지 않음
+* 잘못된 UTF-8은 거부. 각 prompt는 최대 16KiB
+* ICU로 NFC → Unicode 공백 병합 → 문자별 full lowercase → CLIP 정규식 분할을 수행
+* 비교 기준은 Transformers 5.17.0 / tokenizers 0.23.2의 Rust 기반 CLIP. 이 경로는 ftfy를 사용하지 않음
+* 소문자화는 root locale에서 문자별로 수행. `İ`는 `i` + 결합점으로 확장하며 `ΟΣ`는 `οσ`가 된다. 문자열 전체 소문자화나 case folding으로 대체하지 않음
+* 분해형 악센트·한글 자모·결합 문자·Unicode 공백 등의 기준 token IDs를 회귀 테스트로 고정. Unicode 데이터 버전 차이까지 포함한 모든 입력의 일치를 보장하지는 않음
 * 앱이 배포한 SD1.5 CLIP 어휘 사용. `.mtok`와 다른 모델의 tokenizer는 지원하지 않음
 * C++ `mt19937` + `normal_distribution<float>(0, 1)`로 float 16,384개 생성
 * 동일 빌드·실행 환경의 고정 seed 재현을 검사. 기존 NumPy seed 이미지 및 Windows/Android 간 비트 일치는 보장하지 않음
