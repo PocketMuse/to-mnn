@@ -12,6 +12,7 @@ class ConverterApiTest(unittest.TestCase):
             result = subprocess.run(
                 [
                     os.environ.get("SD15_API_TEST", "/usr/local/bin/sd15-api-test"),
+                    "--work-dir",
                     directory,
                 ],
                 capture_output=True,

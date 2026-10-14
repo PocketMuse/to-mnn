@@ -13,7 +13,7 @@ RUN git init "$VCPKG_ROOT" \
     && git -C "$VCPKG_ROOT" fetch --depth 1 origin "$(python3 -c 'import json; print(json.load(open("/opt/manifest/vcpkg.json"))["builtin-baseline"])')" \
     && git -C "$VCPKG_ROOT" checkout --detach FETCH_HEAD \
     && "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics \
-    && "$VCPKG_ROOT/vcpkg" install --x-feature=cli --x-manifest-root=/opt/manifest --x-install-root=/opt/vcpkg_installed
+    && "$VCPKG_ROOT/vcpkg" install --x-feature=cli --x-feature=tests --x-manifest-root=/opt/manifest --x-install-root=/opt/vcpkg_installed
 
 WORKDIR /workspace
 ENTRYPOINT ["bash", "scripts/lint-cpp.sh"]

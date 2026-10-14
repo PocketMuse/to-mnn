@@ -4,6 +4,10 @@
   "builtin-baseline": "e456309491fd875487bf02b8a0dca76c1b1b00cc",
   "dependencies": ["nlohmann-json"],
   "features": {
+    "tests": {
+      "description": "C++ test framework",
+      "dependencies": ["catch2"]
+    },
     "cli": {
       "description": "Command-line argument parsing",
       "dependencies": ["cli11"]

@@ -32,6 +32,7 @@ class NativeTokenizerTest(unittest.TestCase):
                 result = subprocess.run(
                     [
                         os.environ["SD15_TOKENIZER_TEST"],
+                        "--tokenizer-dir",
                         os.environ["SD15_TOKENIZER_DIR"],
                         "--stdin",
                     ],

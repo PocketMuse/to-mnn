@@ -131,10 +131,23 @@ bash scripts/build-mnn.sh
 
 * 작은 테스트 데이터로 변환기·템플릿 생성기·비교기와 잘못된 입력 처리를 검사
 * 실제 모델 파일은 불필요
+* C++ 검증은 Catch2, 실행 관리는 CTest를 사용한다. Python 통합 테스트는 unittest를 유지한다.
+* Catch2는 `BUILD_TESTING=ON`일 때 manifest의 `tests` 기능으로 선택하며 테스트 실행 파일에만 연결한다.
 
 ```bash
 docker compose -f compose.sd15.yaml run --rm test
 ```
+
+Windows Runtime 빌드 후 수학 테스트 선택 실행:
+
+```bash
+ctest --test-dir build/windows-runtime -R runtime_math --output-on-failure
+./build/windows-runtime/runtime/sd15-runtime-test.exe --list-tests
+./build/windows-runtime/runtime/sd15-runtime-test.exe "DDIM*"
+```
+
+* `CHECK`는 실패를 기록하고 계속 진행하며, 뒤 검증의 전제조건은 `REQUIRE`로 검사한다.
+* Catch2 연결·CTest 등록은 [공식 CMake 안내](https://catch2-temp.readthedocs.io/en/latest/cmake-integration.html)를 따른다.
 
 ## 코드 검사 및 포맷
 

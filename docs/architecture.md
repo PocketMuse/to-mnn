@@ -74,6 +74,7 @@ sd15-convert, sd15-infer → CLI11
 * MNN은 기존 Git 고정 네이티브 빌드를 유지. Unicode 보조 소스는 같은 저장소에서 가져와 우리 Runtime 빌드에 포함. 둘 다 vcpkg로 관리하지 않음
 * CMake 선택: `SD15_BUILD_CONVERTER`(기본 ON), `SD15_BUILD_RUNTIME`(기본 OFF), `SD15_BUILD_CLI`(기본 ON)
 * 테스트는 `BUILD_TESTING`으로 선택. 기존 Docker Converter 빌드는 유지
+* C++ 테스트는 vcpkg의 Catch2를 사용. 순수 단위 테스트는 CTest에 케이스별로 등록하며 자원·임시 폴더가 필요한 통합 테스트는 기존 실행 경로를 유지
 * Python 인터프리터는 Converter 테스트를 켰을 때 필요
 * Runtime은 Windows OpenCL 동기 이미지 생성까지 구현. 취소·비동기·캐시는 미구현
 * Runtime 빌드·실행·검증 범위: [Runtime 문서](runtime-api.md)

@@ -16,7 +16,7 @@
 
 * 기존 [MNN 빌드](../README.md#3-mnnruntime-빌드)를 먼저 실행
 * MSVC x64, Windows SDK, CMake, Ninja 필요. 프로젝트 루트의 Git Bash에서 실행
-* 설치된 vcpkg의 `VCPKG_ROOT` 환경변수 필요. JSON·CLI11은 configure 시 manifest 기준으로 준비
+* 설치된 vcpkg의 `VCPKG_ROOT` 환경변수 필요. JSON·CLI11·테스트용 Catch2는 configure 시 manifest 기준으로 준비
 * vcpkg 도입 전의 빌드 폴더는 기존 CMake 캐시를 초기화한 뒤 실행
 
 ```bash
@@ -28,6 +28,16 @@ bash scripts/build-runtime.sh
 * Converter는 끄고 Runtime·CLI·C++ 테스트만 빌드
 * 출력: `build/windows-runtime/cli/sd15-infer.exe`, 실행 파일 옆에 `MNN.dll` 복사
 * C++ 테스트 실패 시 스크립트 실패. `BUILD_JOBS=4`로 빌드 병렬 수 조정 가능
+
+선택적 통합 테스트는 `SD15_TEST_TOKENIZER_DIR`, `SD15_TEST_MODEL_DIR` 환경변수로 빌드 스크립트에 자원 경로를 전달한다. 모델 검증은 Windows 네이티브 OpenCL에서 실행한다.
+
+```bash
+# 이미 빌드한 테스트를 직접 실행
+./build/windows-runtime/runtime/sd15-tokenizer-test.exe --tokenizer-dir TOKENIZER_DIR
+./build/windows-runtime/runtime/sd15-generation-test.exe --model-dir MODEL_DIR --tokenizer-dir TOKENIZER_DIR
+```
+
+토크나이저 대조 도구는 `--tokenizer-dir DIR --stdin`으로 UTF-8 prompt를 읽고 token IDs만 출력한다.
 
 ## 3. 모델 자원과 실행
 
