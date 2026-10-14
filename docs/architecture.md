@@ -64,10 +64,12 @@ docs/                         # 정책·API·검증 기록
 
 ```text
 sd15-convert → sd15_converter → nlohmann_json, Threads
-sd15-infer → sd15_runtime → MNN, MNN Unicode 소스, JSON 헤더
+sd15-infer → sd15_runtime → MNN, MNN Unicode 소스, nlohmann_json
 ```
 
 * Converter는 MNNConvert·MNN Runtime 없이 실행
+* JSON은 `cpp/vcpkg.json`의 baseline으로 관리. CMake는 기존 `VCPKG_ROOT`를 사용하며 패키지는 빌드 폴더에 설치
+* MNN은 기존 Git 고정 네이티브 빌드를 유지. Unicode 보조 소스는 같은 저장소에서 가져와 우리 Runtime 빌드에 포함. 둘 다 vcpkg로 관리하지 않음
 * CMake 선택: `SD15_BUILD_CONVERTER`(기본 ON), `SD15_BUILD_RUNTIME`(기본 OFF), `SD15_BUILD_CLI`(기본 ON)
 * 테스트는 `BUILD_TESTING`으로 선택. 기존 Docker Converter 빌드는 유지
 * Python 인터프리터는 Converter 테스트를 켰을 때 필요

@@ -1,7 +1,7 @@
 #include "clip_tokenizer.hpp"
 #include "sd15/runtime.hpp"
 
-#include <json.hpp>
+#include <nlohmann/json.hpp>
 #include <unicode.hpp>
 
 #include <algorithm>

@@ -4,6 +4,14 @@
 * UNet: W8 + HQQ + Block128, CLIP/VAE: FP16
 * Docker Compose 2.22 이상이 필요하며 OpenCL 추론은 Windows 네이티브 환경에서 실행
 
+C++ 의존성은 `cpp/vcpkg.json`의 baseline으로 고정한다. 현재 대상은 기존 JSON 라이브러리 하나다.
+
+* Windows는 설치된 vcpkg를 `VCPKG_ROOT` 환경변수로 연결한다. 개인 절대경로를 설정 파일에 기록하지 않는다.
+* CMake configure 시 필요한 패키지를 빌드 폴더의 `vcpkg_installed`에 준비한다. 최초 실행에는 다운로드가 필요할 수 있다.
+* 기존 vcpkg 미사용 빌드 폴더는 CMake 캐시를 초기화하거나 새 빌드 폴더를 사용한다.
+* Docker는 같은 baseline의 Linux vcpkg를 이미지 내부에 준비한다. PC의 vcpkg 설치는 변경하지 않는다.
+* MNNRuntime의 Git 고정 빌드, CLI 파싱과 PNG 라이브러리는 기존 방식을 유지한다.
+
 모델 경로:
 
 ```text
@@ -115,6 +123,7 @@ bash scripts/build-mnn.sh
 
 * Windows C++에서 CLIP → UNet → VAE 실행과 PNG 저장
 * C++에서 prompt 토큰화와 seed 기반 초기 latent 생성.
+* Runtime 빌드에는 `VCPKG_ROOT`가 필요하다. 실행 방법은 [Runtime 문서](docs/runtime-api.md) 참고.
 
 ## 테스트
 

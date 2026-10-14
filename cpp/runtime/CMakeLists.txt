@@ -1,4 +1,5 @@
 include(${CMAKE_CURRENT_LIST_DIR}/../cmake/MNN.cmake)
+find_package(nlohmann_json 3.11 CONFIG REQUIRED)
 
 # 고정 MNN 소스의 Unicode 처리만 재사용한다. LLM 엔진은 빌드하지 않는다.
 set(MNN_TOKENIZER_DIR "${MNN_SOURCE_DIR}/transformers/llm/engine/src/tokenizer")
@@ -11,8 +12,7 @@ endif()
 
 add_library(sd15_runtime STATIC src/runtime.cpp src/diffusion.cpp src/clip_tokenizer.cpp)
 target_include_directories(sd15_runtime PUBLIC include)
-target_include_directories(sd15_runtime SYSTEM PRIVATE "${MNN_SOURCE_DIR}/transformers/llm/engine/app/jsonhpp")
-target_link_libraries(sd15_runtime PRIVATE sd15_mnn sd15_unicode)
+target_link_libraries(sd15_runtime PRIVATE sd15_mnn sd15_unicode nlohmann_json::nlohmann_json)
 target_compile_features(sd15_runtime PUBLIC cxx_std_17)
 if(MSVC)
     target_compile_options(sd15_runtime PRIVATE /W4 /utf-8 /fp:strict)

@@ -1,4 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+    if(NOT DEFINED ENV{VCPKG_ROOT} OR "$ENV{VCPKG_ROOT}" STREQUAL "")
+        message(FATAL_ERROR "Set VCPKG_ROOT to your existing vcpkg installation")
+    endif()
+    file(TO_CMAKE_PATH "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" vcpkg_toolchain)
+    set(CMAKE_TOOLCHAIN_FILE "${vcpkg_toolchain}" CACHE FILEPATH "vcpkg toolchain")
+endif()
 project(to_mnn LANGUAGES CXX)
 
 option(SD15_BUILD_CONVERTER "Build the converter" ON)

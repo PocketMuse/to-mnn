@@ -35,6 +35,7 @@ case "$mode" in
         build_dir=$(mktemp -d /tmp/to-mnn-lint.XXXXXX)
         trap 'rm -rf -- "$build_dir"' EXIT
         cmake -S cpp -B "$build_dir" -DCMAKE_BUILD_TYPE=Debug \
+            -DVCPKG_MANIFEST_INSTALL=OFF -DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed \
             -DBUILD_TESTING=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_STANDARD_REQUIRED=ON
         sources=()

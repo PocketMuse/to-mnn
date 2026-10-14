@@ -1,4 +1,4 @@
-find_package(nlohmann_json 3.11 REQUIRED)
+find_package(nlohmann_json 3.11 CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 add_library(sd15_converter STATIC src/converter.cpp src/conversion_plan.cpp src/hqq.cpp src/hqq_workers.cpp src/tensor_transform.cpp src/conversion_service.cpp)
 target_include_directories(sd15_converter PUBLIC include)

@@ -2,3 +2,7 @@
 /artifacts
 .venv
 .ruff_cache/
+/MNNRuntime
+/build
+/.git
+**/vcpkg_installed

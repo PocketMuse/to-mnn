@@ -16,13 +16,15 @@
 
 * 기존 [MNN 빌드](../README.md#3-mnnruntime-빌드)를 먼저 실행
 * MSVC x64, Windows SDK, CMake, Ninja 필요. 프로젝트 루트의 Git Bash에서 실행
+* 설치된 vcpkg의 `VCPKG_ROOT` 환경변수 필요. JSON은 configure 시 manifest 기준으로 준비
+* vcpkg 도입 전의 빌드 폴더는 기존 CMake 캐시를 초기화한 뒤 실행
 
 ```bash
 bash scripts/build-runtime.sh
 ```
 
 * 기존 `MNNRuntime/build/{MNN.dll,MNN.lib}`에 연결. MNN 자체는 재빌드하지 않음
-* 고정 MNN 소스의 Unicode 처리와 JSON 헤더 사용. LLM·공식 diffusion 엔진은 빌드하지 않음
+* 고정 MNN 소스의 Unicode 처리와 vcpkg의 JSON 헤더 사용. LLM·공식 diffusion 엔진은 빌드하지 않음
 * Converter는 끄고 Runtime·CLI·C++ 테스트만 빌드
 * 출력: `build/windows-runtime/cli/sd15-infer.exe`, 실행 파일 옆에 `MNN.dll` 복사
 * C++ 테스트 실패 시 스크립트 실패. `BUILD_JOBS=4`로 빌드 병렬 수 조정 가능
