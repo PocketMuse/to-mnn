@@ -55,6 +55,15 @@ TEST_CASE("Seeds preserve explicit values and resolve negative values") {
     CHECK(varied);
 }
 
+TEST_CASE("DDIM exposes the clean prediction for previews") {
+    std::vector<float> latent{1.0f};
+    std::vector<float> clean;
+    detail::ddim_step(latent, {0.1f}, {0.3f}, 2.0f, 0.25f, 0.81f, &clean);
+    REQUIRE(clean.size() == 1);
+    CHECK(std::abs(clean[0] - 1.1339746f) < 1e-6f);
+    CHECK(std::abs(latent[0] - (0.9f * clean[0] + std::sqrt(0.19f) * 0.5f)) < 1e-6f);
+}
+
 TEST_CASE("Generation options reject invalid seeds steps and guidance") {
     GenerateOptions options;
     options.seed = 4294967296LL;

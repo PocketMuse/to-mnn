@@ -22,6 +22,7 @@ struct GenerateOptions {
     int64_t seed = -1;
     int steps = 20;
     float guidance = 7.5f;
+    int preview_interval = 0; // 0은 끔. 마지막 스텝도 간격에 맞으면 전달한다.
 };
 
 enum class Precision { High, Normal, Low };
@@ -41,6 +42,8 @@ struct RuntimeOptions {
     ModelOptions clip;
     ModelOptions unet;
     ModelOptions vae;
+    std::string preview_decoder_path;
+    ModelOptions preview;
 };
 
 struct Image {
@@ -53,6 +56,8 @@ struct Image {
 // 동기 실행. 콜백도 호출 스레드에서 실행하며 오류는 예외로 전달한다.
 // prompt는 UTF-8. batch 1, DDIM eta=0, OpenCL만 사용한다.
 using InferenceProgress = std::function<void(const std::string& stage, int step, int total)>;
+// 호출 스레드에서 실행. 이미지를 보관하려면 콜백 안에서 복사한다.
+using InferencePreview = std::function<void(int step, int total, const Image& image)>;
 
 class GenerationCancelled : public std::exception {
 public:
@@ -77,13 +82,14 @@ public:
     Sd15Runtime& operator=(const Sd15Runtime&) = delete;
 
     // 모델은 필요한 단계에만 로딩한다. 동시·콜백 내 재진입 호출은 거부한다.
-    Image generate(const GenerateOptions& options, const InferenceProgress& progress = {});
+    Image generate(const GenerateOptions& options, const InferenceProgress& progress = {},
+                   const InferencePreview& preview = {});
     Image generate(const GenerateOptions& options, GenerationCancellationToken& cancellation,
-                   const InferenceProgress& progress = {});
+                   const InferenceProgress& progress = {}, const InferencePreview& preview = {});
 
 private:
     Image generate_impl(const GenerateOptions& options, const InferenceProgress& progress,
-                        const GenerationCancellationToken* cancellation);
+                        const GenerationCancellationToken* cancellation, const InferencePreview& preview);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

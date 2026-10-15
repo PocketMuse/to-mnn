@@ -174,7 +174,35 @@ try {
 
 > 취소 예외와 새 세션의 정상 출력 일치를 확인했다. 스레드 스케줄링·GPU 제출 시점에 따라 차이가 크므로 즉시 중단이나 일정한 취소 지연을 보장하지 않는다.
 
-## 5. 토큰화와 난수
+## 5. TAESD 프리뷰
+
+* `RuntimeOptions.preview_decoder_path`: SD1/2 TAESD decoder의 로컬 MNN 경로.
+* `RuntimeOptions.preview`: 프리뷰 모델의 실행 설정. 기본 high / none / low-memory off.
+* `GenerateOptions.preview_interval`: 0이면 끔, 양수이면 해당 간격마다 프리뷰. 마지막 스텝도 간격에 맞으면 전달.
+* `generate(request, progress, preview)` 또는 `generate(request, cancellation, progress, preview)` 사용.
+* 프리뷰 콜백은 `(int step, int total, const Image&)`. 이미지는 콜백 동안 유효하며 보관하려면 복사.
+* 활성화 시 모델 파일과 콜백이 모두 필요. 원본 TAESD 계약 `[1,4,64,64]` → `[1,3,512,512]`, 출력 `[0,1]` 기준.
+* DDIM의 predicted x0를 디코딩한다. 첫 프리뷰에 로딩하고 UNet과 함께 유지하다 denoising 종료 시 해제.
+* 프리뷰와 콜백은 생성 스레드에서 순차 실행. 오류·취소는 기존 생성 계약을 따르며 최종 이미지는 기존 VAE로 생성.
+
+CLI 추가 옵션: `--preview-decoder FILE --preview-interval 1 --preview-dir NEW_DIR`.
+프리뷰는 `step-1.png` 등의 파일로 저장한다. 기존 프리뷰 디렉터리는 거부한다.
+
+개발 PC의 기존 Docker 이미지에서 변환:
+
+```bash
+docker run --rm --network none -v "$PWD:/project" --entrypoint python \
+  to-mnn-sd15:export-onnx /project/src/sd15/export_taesd.py \
+  --checkpoint /project/models/taesd_decoder.pth --output /project/artifacts/taesd/decoder.onnx
+docker run --rm --network none -e PIP_NO_INDEX=1 -v "$PWD/artifacts/taesd:/output" \
+  --entrypoint mnnconvert to-mnn-sd15:export-mnn -f ONNX \
+  --modelFile /output/decoder.onnx --MNNModel /output/taesd_decoder.mnn --fp16
+```
+
+Windows Git Bash에서는 위 Docker 명령 앞에 `MSYS_NO_PATHCONV=1`을 지정한다.
+TAESD 구조 출처: https://github.com/madebyollin/taesd (MIT).
+
+## 6. 토큰화와 난수
 
 * CLIP byte BPE, 단어 끝 `</w>`, BOS 49406·EOS/padding 49407, 최대 77 tokens. 잘릴 때 마지막 EOS 보존
 * 잘못된 UTF-8은 거부. 각 prompt는 최대 16KiB

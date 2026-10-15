@@ -42,6 +42,21 @@ VaeDecoder::VaeDecoder(const std::filesystem::path& path, const ModelOptions& op
     : session_(path, 1, options, cancellation) {
 }
 
+PreviewDecoder::PreviewDecoder(const std::filesystem::path& path, const ModelOptions& options,
+                               const GenerationCancellationToken* cancellation)
+    : session_(path, 1, options, cancellation) {
+}
+
+Image PreviewDecoder::decode(const std::vector<float>& latent) {
+    // 원본 TAESD는 diffusion latent를 직접 받고 [0, 1] RGB를 반환한다.
+    session_.input("latent_sample", kLatentShape, latent);
+    auto decoded = session_.run("sample", {1, 3, kImageSize, kImageSize});
+    for (auto& value : decoded) {
+        value = value * 2.0f - 1.0f;
+    }
+    return pixels(decoded);
+}
+
 Image VaeDecoder::decode(std::vector<float> latent) {
     for (auto& value : latent) {
         value /= kVaeScalingFactor;

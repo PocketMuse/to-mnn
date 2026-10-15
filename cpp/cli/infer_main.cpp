@@ -16,11 +16,34 @@
 
 namespace {
 
+void save_png(const std::filesystem::path& output, const sd15::Image& image) {
+    if (std::filesystem::exists(output)) {
+        throw std::invalid_argument("Output already exists: " + output.u8string());
+    }
+    if (!output.parent_path().empty()) {
+        std::filesystem::create_directories(output.parent_path());
+    }
+    std::ofstream png(output, std::ios::binary);
+    if (!png) {
+        throw std::runtime_error("Cannot open output: " + output.u8string());
+    }
+    const auto write = [](void* context, void* data, int size) {
+        static_cast<std::ofstream*>(context)->write(static_cast<const char*>(data), size);
+    };
+    const bool encoded =
+        stbi_write_png_to_func(write, &png, image.width, image.height, 3, image.rgb.data(), image.width * 3) != 0;
+    png.close();
+    if (!encoded || !png) {
+        throw std::runtime_error("Failed to write PNG: " + output.u8string());
+    }
+}
+
 template <typename Char> int run(int argc, const Char* const* argv) {
     try {
         sd15::RuntimeOptions runtime_options;
         sd15::GenerateOptions options;
         std::string output_name;
+        std::string preview_directory;
         const std::array<std::string, 3> names{"clip", "unet", "vae"};
         std::array<std::string, 3> precisions{"high", "high", "high"};
         std::array<std::string, 3> tunings{"none", "none", "none"};
@@ -59,6 +82,11 @@ template <typename Char> int run(int argc, const Char* const* argv) {
         app.add_option("--steps", options.steps, "DDIM steps")->check(CLI::Range(1, 999))->capture_default_str();
         app.add_option("--guidance", options.guidance, "Finite guidance scale")->capture_default_str();
         app.add_option("--output", output_name, "New PNG file")->required()->check(nonempty);
+        app.add_option("--preview-decoder", runtime_options.preview_decoder_path, "Local TAESD MNN decoder");
+        app.add_option("--preview-interval", options.preview_interval, "Preview every N steps; 0 disables")
+            ->check(CLI::Range(0, 999))
+            ->capture_default_str();
+        app.add_option("--preview-dir", preview_directory, "New directory for step PNGs");
         try {
             app.parse(argc, argv);
         }
@@ -83,35 +111,35 @@ template <typename Char> int run(int argc, const Char* const* argv) {
         if (std::filesystem::exists(output)) {
             throw std::invalid_argument("Output already exists: " + output.u8string());
         }
+        sd15::InferencePreview preview;
+        if (options.preview_interval > 0) {
+            if (preview_directory.empty() || std::filesystem::exists(std::filesystem::u8path(preview_directory))) {
+                throw std::invalid_argument("Previews require a new --preview-dir");
+            }
+            preview = [&](int step, int, const sd15::Image& image) {
+                const auto name = "step-" + std::to_string(step) + ".png";
+                const auto path = std::filesystem::u8path(preview_directory) / name;
+                save_png(path, image);
+                std::cout << "Preview " << step << ": " << path.u8string() << std::endl;
+            };
+        }
         for (std::size_t i = 0; i < models.size(); ++i) {
             std::cout << names[i] << " requested: precision=" << precisions[i] << ", tuning=" << tunings[i]
                       << ", low-memory=" << models[i]->low_memory << std::endl;
         }
         const auto started = std::chrono::steady_clock::now();
         sd15::Sd15Runtime runtime(runtime_options);
-        const auto image = runtime.generate(options, [](const std::string& stage, int step, int total) {
-            std::cout << stage;
-            if (step != 0) {
-                std::cout << " " << step << "/" << total;
-            }
-            std::cout << std::endl;
-        });
-        if (!output.parent_path().empty()) {
-            std::filesystem::create_directories(output.parent_path());
-        }
-        std::ofstream png(output, std::ios::binary);
-        if (!png) {
-            throw std::runtime_error("Cannot open output: " + output.u8string());
-        }
-        const auto write = [](void* context, void* data, int size) {
-            static_cast<std::ofstream*>(context)->write(static_cast<const char*>(data), size);
-        };
-        const bool encoded =
-            stbi_write_png_to_func(write, &png, image.width, image.height, 3, image.rgb.data(), image.width * 3) != 0;
-        png.close();
-        if (!encoded || !png) {
-            throw std::runtime_error("Failed to write PNG: " + output.u8string());
-        }
+        const auto image = runtime.generate(
+            options,
+            [](const std::string& stage, int step, int total) {
+                std::cout << stage;
+                if (step != 0) {
+                    std::cout << " " << step << "/" << total;
+                }
+                std::cout << std::endl;
+            },
+            preview);
+        save_png(output, image);
         const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         std::cout << "Saved " << output.u8string() << " (" << image.width << "x" << image.height << "), " << elapsed
                   << "s, seed=" << image.seed << ", OpenCL buffer\n";

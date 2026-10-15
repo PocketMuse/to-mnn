@@ -24,6 +24,16 @@ private:
     MnnModelSession session_;
 };
 
+class PreviewDecoder {
+public:
+    PreviewDecoder(const std::filesystem::path& path, const ModelOptions& options,
+                   const GenerationCancellationToken* cancellation = nullptr);
+    Image decode(const std::vector<float>& latent);
+
+private:
+    MnnModelSession session_;
+};
+
 class VaeDecoder {
 public:
     VaeDecoder(const std::filesystem::path& path, const ModelOptions& options,

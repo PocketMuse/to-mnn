@@ -18,7 +18,8 @@ std::vector<float> initial_noise(uint32_t seed);
 std::vector<float> alphas(const SchedulerConfig& config);
 std::vector<int> timesteps(const SchedulerConfig& config, int steps);
 void ddim_step(std::vector<float>& latent, const std::vector<float>& unconditional,
-               const std::vector<float>& conditional, float guidance, float alpha, float previous_alpha);
+               const std::vector<float>& conditional, float guidance, float alpha, float previous_alpha,
+               std::vector<float>* clean_prediction = nullptr);
 Image pixels(const std::vector<float>& decoded);
 
 } // namespace sd15::detail

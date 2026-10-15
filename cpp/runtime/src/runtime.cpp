@@ -26,6 +26,7 @@ Sd15Runtime::Sd15Runtime(const RuntimeOptions& options) {
     detail::validate_model_options(options.clip);
     detail::validate_model_options(options.unet);
     detail::validate_model_options(options.vae);
+    detail::validate_model_options(options.preview);
     if (options.model_dir.empty()) {
         throw std::invalid_argument("Model directory is required");
     }
@@ -41,17 +42,18 @@ Sd15Runtime::Sd15Runtime(const RuntimeOptions& options) {
 
 Sd15Runtime::~Sd15Runtime() = default;
 
-Image Sd15Runtime::generate(const GenerateOptions& request, const InferenceProgress& progress) {
-    return generate_impl(request, progress, nullptr);
+Image Sd15Runtime::generate(const GenerateOptions& request, const InferenceProgress& progress,
+                            const InferencePreview& preview) {
+    return generate_impl(request, progress, nullptr, preview);
 }
 
 Image Sd15Runtime::generate(const GenerateOptions& request, GenerationCancellationToken& cancellation,
-                            const InferenceProgress& progress) {
-    return generate_impl(request, progress, &cancellation);
+                            const InferenceProgress& progress, const InferencePreview& preview) {
+    return generate_impl(request, progress, &cancellation, preview);
 }
 
 Image Sd15Runtime::generate_impl(const GenerateOptions& request, const InferenceProgress& progress,
-                                 const GenerationCancellationToken* cancellation) {
+                                 const GenerationCancellationToken* cancellation, const InferencePreview& preview) {
     if (impl_->busy.test_and_set(std::memory_order_acquire)) {
         throw std::runtime_error("Runtime is busy");
     }
@@ -63,6 +65,10 @@ Image Sd15Runtime::generate_impl(const GenerateOptions& request, const Inference
     // 콜백에서 호출자가 원래 요청을 바꾸어도 이번 생성의 설정은 유지한다.
     const auto options = request;
     detail::validate(options);
+    if (options.preview_interval > 0 &&
+        (!preview || !std::filesystem::is_regular_file(impl_->config.preview_decoder_path))) {
+        throw std::invalid_argument("Previews require a TAESD model path and callback");
+    }
     const auto seed = detail::resolve_seed(options.seed);
     const auto& root = impl_->root;
     const auto tokens = impl_->tokenizer.encode(options.prompt);
@@ -89,6 +95,8 @@ Image Sd15Runtime::generate_impl(const GenerateOptions& request, const Inference
     {
         notify("unet");
         detail::UNetDenoiser unet(root / "unet.mnn", impl_->config.unet, cancellation);
+        std::unique_ptr<detail::PreviewDecoder> preview_decoder;
+        std::vector<float> clean_prediction;
         for (int i = 0; i < options.steps; ++i) {
             const int time = times[i];
             const auto negative = unet.predict(latent, time, negative_context);
@@ -96,8 +104,21 @@ Image Sd15Runtime::generate_impl(const GenerateOptions& request, const Inference
             const int previous = time - scheduler.train_steps / options.steps;
             const float previous_alpha =
                 previous >= 0 ? alpha[previous] : (scheduler.set_alpha_to_one ? 1.0f : alpha.front());
-            detail::ddim_step(latent, negative, positive, options.guidance, alpha[time], previous_alpha);
+            const bool preview_step = options.preview_interval > 0 && (i + 1) % options.preview_interval == 0;
+            detail::ddim_step(latent, negative, positive, options.guidance, alpha[time], previous_alpha,
+                              preview_step ? &clean_prediction : nullptr);
             notify("denoising", i + 1);
+            if (preview_step) {
+                if (!preview_decoder) {
+                    preview_decoder = std::make_unique<detail::PreviewDecoder>(impl_->config.preview_decoder_path,
+                                                                               impl_->config.preview, cancellation);
+                }
+                auto image = preview_decoder->decode(clean_prediction);
+                image.seed = seed;
+                detail::check_cancellation(cancellation);
+                preview(i + 1, options.steps, image);
+                detail::check_cancellation(cancellation);
+            }
         }
     }
     notify("vae_decoder");
