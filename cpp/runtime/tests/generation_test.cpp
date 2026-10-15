@@ -18,7 +18,10 @@ TEST_CASE("Generation preserves requests seeds and recovery") {
     invalid_config.unet_precision = sd15::Precision::High;
     invalid_config.tuning = static_cast<sd15::Tuning>(-1);
     REQUIRE_THROWS_AS(sd15::Sd15Runtime(invalid_config), std::invalid_argument);
-    sd15::Sd15Runtime runtime({model_dir, tokenizer_dir});
+    sd15::RuntimeOptions config{model_dir, tokenizer_dir};
+    sd15::Sd15Runtime runtime(config);
+    // 생성 후 호출자가 설정을 바꿔도 Runtime의 설정은 유지한다.
+    config.unet_precision = static_cast<sd15::Precision>(-1);
     sd15::GenerateOptions request;
     request.prompt = "a photo of a cat";
     request.negative_prompt = "blurry";
@@ -28,7 +31,10 @@ TEST_CASE("Generation preserves requests seeds and recovery") {
     REQUIRE_THROWS_AS(runtime.generate(invalid), std::invalid_argument);
 
     auto original = request;
-    const auto first = runtime.generate(request, [&](const std::string& stage, int, int) {
+    std::vector<std::string> stages;
+    const auto first = runtime.generate(request, [&](const std::string& stage, int step, int total) {
+        stages.push_back(stage + ":" + std::to_string(step));
+        CHECK(total == original.steps);
         if (stage == "text_encoder") {
             request.seed = 123;
             bool busy = false;
@@ -42,6 +48,9 @@ TEST_CASE("Generation preserves requests seeds and recovery") {
             REQUIRE(busy);
         }
     });
+    const std::vector<std::string> expected_stages{"text_encoder:0", "unet:0", "denoising:1", "denoising:2",
+                                                   "vae_decoder:0"};
+    CHECK(stages == expected_stages);
     UNSCOPED_INFO("Unexpected image size");
     REQUIRE(first.rgb.size() == 3 * sd15::kImageSize * sd15::kImageSize);
     // 기본 음수 seed로 생성한 결과를 실제 seed로 재현한다.

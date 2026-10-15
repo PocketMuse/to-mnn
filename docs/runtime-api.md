@@ -79,6 +79,7 @@ cp "$cache/snapshots/$revision/tokenizer/"{vocab.json,merges.txt} \
 ## 4. C++ API와 수명
 
 실행 옵션은 `RuntimeOptions`에서 지정하며 인스턴스 생성 후 고정된다.
+내부에서는 모델별 공통 `ModelOptions`로 변환한다. `ClipEncoder`·`UNetDenoiser`·`VaeDecoder`가 입출력 계약을, `MnnModelSession`이 MNN 설정과 세션을 담당한다. 이 클래스들은 내부 구현이며 공개 API는 아래와 같다.
 
 | 필드 | 값 / 기본값 | CLI |
 | --- | --- | --- |

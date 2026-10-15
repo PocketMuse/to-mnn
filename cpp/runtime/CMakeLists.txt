@@ -3,7 +3,8 @@ find_package(nlohmann_json 3.11 CONFIG REQUIRED)
 
 find_package(ICU REQUIRED COMPONENTS uc i18n)
 
-add_library(sd15_runtime STATIC src/runtime.cpp src/diffusion.cpp src/clip_tokenizer.cpp)
+add_library(sd15_runtime STATIC src/runtime.cpp src/diffusion.cpp src/clip_tokenizer.cpp
+    src/mnn_model_session.cpp src/sd15_models.cpp)
 target_include_directories(sd15_runtime PUBLIC include)
 target_link_libraries(sd15_runtime PRIVATE sd15_mnn ICU::uc ICU::i18n nlohmann_json::nlohmann_json)
 target_compile_features(sd15_runtime PUBLIC cxx_std_17)
