@@ -51,7 +51,9 @@ void validate_mnn_version() {
 }
 
 MnnModelSession::MnnModelSession(const std::filesystem::path& path, std::size_t input_count,
-                                 const ModelOptions& options) {
+                                 const ModelOptions& options, const GenerationCancellationToken* cancellation)
+    : cancellation_(cancellation) {
+    check_cancellation(cancellation_);
     validate_model_options(options);
     if (!std::filesystem::is_regular_file(path)) {
         throw std::runtime_error("Missing model: " + path.string());
@@ -59,6 +61,10 @@ MnnModelSession::MnnModelSession(const std::filesystem::path& path, std::size_t 
     interpreter_.reset(MNN::Interpreter::createFromFile(path.string().c_str()));
     if (!interpreter_) {
         throw std::runtime_error("Cannot load model: " + path.string());
+    }
+    check_cancellation(cancellation_);
+    if (cancellation_ != nullptr) {
+        interpreter_->setSessionMode(MNN::Interpreter::Session_Debug);
     }
     const auto external = path.string() + ".weight";
     if (std::filesystem::is_regular_file(external)) {
@@ -75,6 +81,7 @@ MnnModelSession::MnnModelSession(const std::filesystem::path& path, std::size_t 
     if (session_ == nullptr) {
         throw std::runtime_error("Cannot create OpenCL session: " + path.string());
     }
+    check_cancellation(cancellation_);
     std::array<int, 2> backends{};
     if (!interpreter_->getSessionInfo(session_, MNN::Interpreter::BACKENDS, backends.data()) ||
         backends[0] != MNN_FORWARD_OPENCL) {
@@ -86,11 +93,30 @@ MnnModelSession::MnnModelSession(const std::filesystem::path& path, std::size_t 
 }
 
 std::vector<float> MnnModelSession::run(const char* name, const std::vector<int>& shape) {
-    if (interpreter_->runSession(session_) != MNN::NO_ERROR) {
-        throw std::runtime_error("MNN inference failed");
-    }
+    check_cancellation(cancellation_);
     auto* tensor = interpreter_->getSessionOutput(session_, name);
     check<float>(tensor, name, shape);
+    MNN::ErrorCode code;
+    if (cancellation_ != nullptr) {
+        // MNN 콜백 안에서는 예외를 던지지 않는다. after=false가 세션을 중단한다.
+        const auto proceed = [this](const std::vector<MNN::Tensor*>&, const MNN::OperatorInfo*) {
+            return !cancellation_->is_requested();
+        };
+        code = interpreter_->runSessionWithCallBackInfo(session_, proceed, proceed);
+    }
+    else {
+        code = interpreter_->runSession(session_);
+    }
+    if (code == MNN::CALL_BACK_STOP) {
+        // 중단된 출력은 읽지 않고 이미 제출한 GPU 작업만 기다린다.
+        if (tensor->wait(MNN::Tensor::MAP_TENSOR_READ, true) != 0) {
+            throw std::runtime_error("Cannot wait for cancelled MNN execution");
+        }
+        throw GenerationCancelled{};
+    }
+    if (code != MNN::NO_ERROR) {
+        throw std::runtime_error("MNN inference failed");
+    }
     MNN::Tensor host(tensor, MNN::Tensor::CAFFE);
     if (host.host<float>() == nullptr || !tensor->copyToHostTensor(&host)) {
         throw std::runtime_error("Cannot copy output");
@@ -100,6 +126,7 @@ std::vector<float> MnnModelSession::run(const char* name, const std::vector<int>
     if (std::any_of(result.begin(), result.end(), [](float value) { return !std::isfinite(value); })) {
         throw std::runtime_error(std::string("Non-finite output: ") + name);
     }
+    check_cancellation(cancellation_);
     return result;
 }
 

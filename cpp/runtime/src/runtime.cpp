@@ -42,6 +42,16 @@ Sd15Runtime::Sd15Runtime(const RuntimeOptions& options) {
 Sd15Runtime::~Sd15Runtime() = default;
 
 Image Sd15Runtime::generate(const GenerateOptions& request, const InferenceProgress& progress) {
+    return generate_impl(request, progress, nullptr);
+}
+
+Image Sd15Runtime::generate(const GenerateOptions& request, GenerationCancellationToken& cancellation,
+                            const InferenceProgress& progress) {
+    return generate_impl(request, progress, &cancellation);
+}
+
+Image Sd15Runtime::generate_impl(const GenerateOptions& request, const InferenceProgress& progress,
+                                 const GenerationCancellationToken* cancellation) {
     if (impl_->busy.test_and_set(std::memory_order_acquire)) {
         throw std::runtime_error("Runtime is busy");
     }
@@ -49,6 +59,7 @@ Image Sd15Runtime::generate(const GenerateOptions& request, const InferenceProgr
         std::atomic_flag& flag;
         ~ResetBusy() { flag.clear(std::memory_order_release); }
     } reset{impl_->busy};
+    detail::check_cancellation(cancellation);
     // 콜백에서 호출자가 원래 요청을 바꾸어도 이번 생성의 설정은 유지한다.
     const auto options = request;
     detail::validate(options);
@@ -58,9 +69,11 @@ Image Sd15Runtime::generate(const GenerateOptions& request, const InferenceProgr
     const auto negative_tokens = impl_->tokenizer.encode(options.negative_prompt);
     const detail::SchedulerConfig scheduler;
     const auto notify = [&](const char* stage, int step = 0) {
+        detail::check_cancellation(cancellation);
         if (progress) {
             progress(stage, step, options.steps);
         }
+        detail::check_cancellation(cancellation);
     };
     const auto alpha = detail::alphas(scheduler);
     const auto times = detail::timesteps(scheduler, options.steps);
@@ -68,14 +81,14 @@ Image Sd15Runtime::generate(const GenerateOptions& request, const InferenceProgr
     std::vector<float> context;
     {
         notify("text_encoder");
-        detail::ClipEncoder encoder(root / "text_encoder.mnn", impl_->config.clip);
+        detail::ClipEncoder encoder(root / "text_encoder.mnn", impl_->config.clip, cancellation);
         negative_context = encoder.encode(negative_tokens);
         context = encoder.encode(tokens);
     }
     auto latent = detail::initial_noise(seed);
     {
         notify("unet");
-        detail::UNetDenoiser unet(root / "unet.mnn", impl_->config.unet);
+        detail::UNetDenoiser unet(root / "unet.mnn", impl_->config.unet, cancellation);
         for (int i = 0; i < options.steps; ++i) {
             const int time = times[i];
             const auto negative = unet.predict(latent, time, negative_context);
@@ -88,9 +101,10 @@ Image Sd15Runtime::generate(const GenerateOptions& request, const InferenceProgr
         }
     }
     notify("vae_decoder");
-    detail::VaeDecoder decoder(root / "vae_decoder.mnn", impl_->config.vae);
+    detail::VaeDecoder decoder(root / "vae_decoder.mnn", impl_->config.vae, cancellation);
     auto image = decoder.decode(std::move(latent));
     image.seed = seed;
+    detail::check_cancellation(cancellation);
     return image;
 }
 

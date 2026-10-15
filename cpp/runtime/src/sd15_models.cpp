@@ -13,7 +13,9 @@ const std::vector<int> kContextShape{1, kSequenceLength, kHiddenSize};
 
 } // namespace
 
-ClipEncoder::ClipEncoder(const std::filesystem::path& path, const ModelOptions& options) : session_(path, 1, options) {
+ClipEncoder::ClipEncoder(const std::filesystem::path& path, const ModelOptions& options,
+                         const GenerationCancellationToken* cancellation)
+    : session_(path, 1, options, cancellation) {
 }
 
 std::vector<float> ClipEncoder::encode(const std::vector<int32_t>& tokens) {
@@ -21,8 +23,9 @@ std::vector<float> ClipEncoder::encode(const std::vector<int32_t>& tokens) {
     return session_.run("last_hidden_state", kContextShape);
 }
 
-UNetDenoiser::UNetDenoiser(const std::filesystem::path& path, const ModelOptions& options)
-    : session_(path, 3, options) {
+UNetDenoiser::UNetDenoiser(const std::filesystem::path& path, const ModelOptions& options,
+                           const GenerationCancellationToken* cancellation)
+    : session_(path, 3, options, cancellation) {
 }
 
 std::vector<float> UNetDenoiser::predict(const std::vector<float>& latent, int timestep,
@@ -34,7 +37,9 @@ std::vector<float> UNetDenoiser::predict(const std::vector<float>& latent, int t
     return session_.run("out_sample", kLatentShape);
 }
 
-VaeDecoder::VaeDecoder(const std::filesystem::path& path, const ModelOptions& options) : session_(path, 1, options) {
+VaeDecoder::VaeDecoder(const std::filesystem::path& path, const ModelOptions& options,
+                       const GenerationCancellationToken* cancellation)
+    : session_(path, 1, options, cancellation) {
 }
 
 Image VaeDecoder::decode(std::vector<float> latent) {

@@ -14,13 +14,20 @@ namespace sd15::detail {
 
 void validate_model_options(const ModelOptions& options);
 void validate_mnn_version();
+inline void check_cancellation(const GenerationCancellationToken* cancellation) {
+    if (cancellation != nullptr && cancellation->is_requested()) {
+        throw GenerationCancelled{};
+    }
+}
 
 // 모델 종류를 알지 않는다. Interpreter가 Session까지 소유한다.
 class MnnModelSession {
 public:
-    MnnModelSession(const std::filesystem::path& path, std::size_t input_count, const ModelOptions& options);
+    MnnModelSession(const std::filesystem::path& path, std::size_t input_count, const ModelOptions& options,
+                    const GenerationCancellationToken* cancellation = nullptr);
 
     template <typename T> void input(const char* name, const std::vector<int>& shape, const std::vector<T>& values) {
+        check_cancellation(cancellation_);
         auto* tensor = interpreter_->getSessionInput(session_, name);
         check<T>(tensor, name, shape);
         if (tensor->elementSize() != static_cast<int>(values.size())) {
@@ -39,6 +46,7 @@ public:
     std::vector<float> run(const char* name, const std::vector<int>& shape);
 
 private:
+    const GenerationCancellationToken* cancellation_;
     template <typename T> static void check(MNN::Tensor* tensor, const char* name, const std::vector<int>& shape) {
         if (tensor == nullptr || tensor->shape() != shape) {
             throw std::runtime_error(std::string("Missing tensor or shape mismatch: ") + name);

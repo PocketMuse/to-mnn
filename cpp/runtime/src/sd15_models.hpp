@@ -6,7 +6,8 @@ namespace sd15::detail {
 
 class ClipEncoder {
 public:
-    ClipEncoder(const std::filesystem::path& path, const ModelOptions& options);
+    ClipEncoder(const std::filesystem::path& path, const ModelOptions& options,
+                const GenerationCancellationToken* cancellation = nullptr);
     std::vector<float> encode(const std::vector<int32_t>& tokens);
 
 private:
@@ -15,7 +16,8 @@ private:
 
 class UNetDenoiser {
 public:
-    UNetDenoiser(const std::filesystem::path& path, const ModelOptions& options);
+    UNetDenoiser(const std::filesystem::path& path, const ModelOptions& options,
+                 const GenerationCancellationToken* cancellation = nullptr);
     std::vector<float> predict(const std::vector<float>& latent, int timestep, const std::vector<float>& context);
 
 private:
@@ -24,7 +26,8 @@ private:
 
 class VaeDecoder {
 public:
-    VaeDecoder(const std::filesystem::path& path, const ModelOptions& options);
+    VaeDecoder(const std::filesystem::path& path, const ModelOptions& options,
+               const GenerationCancellationToken* cancellation = nullptr);
     // latent를 받아 내부에서 VAE scale을 적용한다.
     Image decode(std::vector<float> latent);
 

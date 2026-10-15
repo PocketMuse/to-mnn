@@ -1,9 +1,11 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
+#include <exception>
 #include <vector>
 
 namespace sd15 {
@@ -52,6 +54,21 @@ struct Image {
 // prompt는 UTF-8. batch 1, DDIM eta=0, OpenCL만 사용한다.
 using InferenceProgress = std::function<void(const std::string& stage, int step, int total)>;
 
+class GenerationCancelled : public std::exception {
+public:
+    const char* what() const noexcept override { return "Generation cancelled"; }
+};
+
+// 요청마다 새 토큰을 사용하고 generate가 끝날 때까지 유지한다.
+class GenerationCancellationToken {
+public:
+    void request_cancel() noexcept { requested_.store(true, std::memory_order_relaxed); }
+    bool is_requested() const noexcept { return requested_.load(std::memory_order_relaxed); }
+
+private:
+    std::atomic<bool> requested_{false};
+};
+
 class Sd15Runtime {
 public:
     explicit Sd15Runtime(const RuntimeOptions& options);
@@ -61,8 +78,12 @@ public:
 
     // 모델은 필요한 단계에만 로딩한다. 동시·콜백 내 재진입 호출은 거부한다.
     Image generate(const GenerateOptions& options, const InferenceProgress& progress = {});
+    Image generate(const GenerateOptions& options, GenerationCancellationToken& cancellation,
+                   const InferenceProgress& progress = {});
 
 private:
+    Image generate_impl(const GenerateOptions& options, const InferenceProgress& progress,
+                        const GenerationCancellationToken* cancellation);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

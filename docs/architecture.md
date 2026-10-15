@@ -91,5 +91,5 @@ sd15-convert, sd15-infer → CLI11
 * 테스트는 `BUILD_TESTING`으로 선택. 기존 Docker Converter 빌드는 유지
 * C++ 테스트는 vcpkg의 Catch2를 사용. 순수 단위 테스트는 CTest에 케이스별로 등록하며 자원·임시 폴더가 필요한 통합 테스트는 기존 실행 경로를 유지
 * Python 인터프리터는 Converter 테스트를 켰을 때 필요
-* Runtime은 Windows OpenCL 동기 이미지 생성까지 구현. 취소·비동기·캐시는 미구현
+* Runtime은 Windows OpenCL 동기 이미지 생성과 요청별 협력적 취소를 구현. 비동기·캐시는 미구현
 * Runtime 빌드·실행·검증 범위: [Runtime 문서](runtime-api.md)

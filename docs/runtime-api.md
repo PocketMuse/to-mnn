@@ -138,6 +138,32 @@ const auto image = runtime.generate(request, [](const std::string& stage, int st
 
 > 자원 객체의 해제와 OS·GPU 드라이버의 즉시 메모리 반환은 다름. PC 결과를 Android 메모리 검증으로 간주하지 않음
 
+### 생성 취소
+
+```cpp
+sd15::GenerationCancellationToken cancellation;
+try {
+    const auto image = runtime.generate(request, cancellation);
+} catch (const sd15::GenerationCancelled&) {
+    // 취소 완료. 부분 이미지는 반환하지 않는다.
+}
+// 생성 중 다른 스레드 또는 진행 콜백에서 cancellation.request_cancel() 호출.
+```
+
+* 기존 `generate(request, progress)`는 유지하며 취소 콜백 실행 경로를 사용하지 않는다.
+* 토큰은 요청마다 새로 만들고 `generate` 종료까지 유지한다. 취소 요청은 thread-safe·반복 가능하며 리셋하지 않는다.
+* 시작 전·모델 로딩 전후·입력 복사 전·진행 콜백 전후·결과 반환 전에 취소를 확인한다.
+* 모델 실행 중에는 MNN 연산 콜백에서 중단을 요청한다. 중단된 출력은 사용하지 않고 제출된 GPU 작업을 기다린 뒤 `GenerationCancelled`를 전달한다.
+* 모델 로딩·세션 준비·진행 중인 GPU 연산·출력 복사는 강제로 끊지 않는다. GPU에 이미 제출된 작업 때문에 취소가 지연될 수 있다.
+* 마지막 취소 확인 이후의 요청은 성공으로 끝날 수 있다. 완료 후 취소는 반환된 결과에 영향을 주지 않는다.
+* 모델 오류와 사용자 콜백 예외는 그대로 전달한다. 취소 요청으로 기존 오류를 덮어쓰지 않는다.
+* 취소 후 모델 자원과 busy 상태를 해제한다. 같은 Runtime에서 새 토큰으로 다시 생성할 수 있다.
+* 취소는 객체 파괴가 아니다. 호출자는 생성 종료까지 Runtime 수명을 보장하며, 취소 요청 스레드에서 세션을 해제하지 않는다.
+
+> 두 실행의 정상 / 취소 요청 호출 시간: UNet 499 / 462ms, 472 / 195ms; VAE 465 / 453ms, 466 / 65ms. 로딩·해제 시간은 제외한다.
+
+> 취소 예외와 새 세션의 정상 출력 일치를 확인했다. 스레드 스케줄링·GPU 제출 시점에 따라 차이가 크므로 즉시 중단이나 일정한 취소 지연을 보장하지 않는다.
+
 ## 5. 토큰화와 난수
 
 * CLIP byte BPE, 단어 끝 `</w>`, BOS 49406·EOS/padding 49407, 최대 77 tokens. 잘릴 때 마지막 EOS 보존

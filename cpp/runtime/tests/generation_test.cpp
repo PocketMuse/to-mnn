@@ -1,8 +1,14 @@
 #include "sd15/runtime.hpp"
+#include "mnn_model_session.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_session.hpp>
 #include <stdexcept>
+#include <thread>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <iostream>
 
 namespace {
 std::string model_dir;
@@ -64,17 +70,116 @@ TEST_CASE("Generation preserves requests seeds and recovery") {
                                            }
                                        }),
                       Interrupted);
-    const auto repeated = runtime.generate(original);
+    const auto repeated = runtime.generate(original, {});
     UNSCOPED_INFO("Actual seed was not preserved");
     CHECK(repeated.seed == first.seed);
     UNSCOPED_INFO("Repeated generation or exception recovery changed image");
     CHECK(first.rgb == repeated.rgb);
+    sd15::GenerationCancellationToken cancelled;
+    cancelled.request_cancel();
+    cancelled.request_cancel();
+    bool notified = false;
+    REQUIRE_THROWS_AS(runtime.generate(original, cancelled, [&](const std::string&, int, int) { notified = true; }),
+                      sd15::GenerationCancelled);
+    CHECK_FALSE(notified);
+    sd15::GenerationCancellationToken callback_failure;
+    REQUIRE_THROWS_AS(runtime.generate(original, callback_failure,
+                                       [&](const std::string&, int, int) {
+                                           callback_failure.request_cancel();
+                                           throw Interrupted{};
+                                       }),
+                      Interrupted);
+
+    for (const std::string stage_to_cancel : {"text_encoder", "unet", "denoising", "vae_decoder"}) {
+        sd15::GenerationCancellationToken cancellation;
+        bool reached = false;
+        REQUIRE_THROWS_AS(runtime.generate(original, cancellation,
+                                           [&](const std::string& stage, int, int) {
+                                               CHECK_FALSE(reached);
+                                               if (stage == stage_to_cancel) {
+                                                   reached = true;
+                                                   std::thread requester([&] { cancellation.request_cancel(); });
+                                                   requester.join();
+                                               }
+                                           }),
+                          sd15::GenerationCancelled);
+        REQUIRE(reached);
+    }
+    sd15::GenerationCancellationToken fresh;
+    CHECK(runtime.generate(original, fresh).rgb == first.rgb);
     request.seed = first.seed == 123 ? 124 : 123;
     const auto changed = runtime.generate(request);
     UNSCOPED_INFO("Explicit seed was not preserved");
     CHECK(changed.seed == request.seed);
     UNSCOPED_INFO("Different seed did not change image");
     CHECK(first.rgb != changed.rgb);
+}
+
+TEST_CASE("OpenCL execution cancels and new sessions reproduce outputs") {
+    using Clock = std::chrono::steady_clock;
+    for (const std::string model : {"unet", "vae_decoder"}) {
+        const bool unet = model == "unet";
+        const std::vector<int> output_shape = unet ? std::vector<int>{1, 4, 64, 64} : std::vector<int>{1, 3, 512, 512};
+        const char* output_name = unet ? "out_sample" : "sample";
+        const auto prepare = [&](sd15::detail::MnnModelSession& session) {
+            session.input(unet ? "sample" : "latent_sample", {1, 4, 64, 64},
+                          std::vector<float>(sd15::kLatentElements, 0.1f));
+            if (unet) {
+                session.input<int32_t>("timestep", {1}, {500});
+                session.input("encoder_hidden_states", {1, 77, 768}, std::vector<float>(77 * 768, 0.1f));
+            }
+        };
+        const auto path = std::filesystem::path(model_dir) / (model + ".mnn");
+        std::vector<float> expected;
+        {
+            sd15::detail::MnnModelSession session(path, unet ? 3 : 1, {});
+            prepare(session);
+            const auto start = Clock::now();
+            expected = session.run(output_name, output_shape);
+            std::cout << model
+                      << " baseline_ms=" << std::chrono::duration<double, std::milli>(Clock::now() - start).count()
+                      << std::endl;
+        }
+        {
+            sd15::GenerationCancellationToken cancellation;
+            sd15::detail::MnnModelSession session(path, unet ? 3 : 1, {}, &cancellation);
+            prepare(session);
+            // 모델 로딩·입력 복사를 마친 뒤 실행 중 다른 스레드에서 취소한다.
+            std::mutex mutex;
+            std::condition_variable ready;
+            bool started = false;
+            std::thread requester([&] {
+                std::unique_lock<std::mutex> lock(mutex);
+                ready.wait(lock, [&] { return started; });
+                lock.unlock();
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                cancellation.request_cancel();
+            });
+            const auto start = Clock::now();
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                started = true;
+            }
+            ready.notify_one();
+            std::exception_ptr failure;
+            try {
+                session.run(output_name, output_shape);
+            }
+            catch (...) {
+                failure = std::current_exception();
+            }
+            requester.join();
+            std::cout << model
+                      << " cancelled_ms=" << std::chrono::duration<double, std::milli>(Clock::now() - start).count()
+                      << std::endl;
+            REQUIRE(failure);
+            REQUIRE_THROWS_AS(std::rethrow_exception(failure), sd15::GenerationCancelled);
+        }
+        sd15::GenerationCancellationToken fresh;
+        sd15::detail::MnnModelSession recovered(path, unet ? 3 : 1, {}, &fresh);
+        prepare(recovered);
+        CHECK(recovered.run(output_name, output_shape) == expected);
+    }
 }
 
 int main(int argc, char** argv) {
