@@ -20,6 +20,7 @@ struct HqqBatch {
 // 변환 한 번의 작업 스레드를 소유한다. run은 호출 스레드에서만 사용한다.
 class HqqWorkers {
 public:
+    // thread_count는 변환 진입점에서 검증한 [1, kMaxThreadCount] 값이다.
     explicit HqqWorkers(unsigned thread_count);
     ~HqqWorkers();
     HqqWorkers(const HqqWorkers&) = delete;

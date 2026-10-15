@@ -6,6 +6,7 @@
 #include "conversion_json.hpp"
 #include "conversion_plan.hpp"
 #include "hqq_workers.hpp"
+#include "byte_io.hpp"
 
 #include <algorithm>
 #include <array>
@@ -28,18 +29,9 @@ constexpr uint64_t kMaxHeaderBytes = 4 * 1024 * 1024;
 constexpr uint64_t kMaxManifestBytes = 8 * 1024 * 1024;
 constexpr std::size_t kMaxChunkBytes = 4 * 1024 * 1024;
 constexpr char kManifestFilename[] = "manifest.json";
-constexpr uint32_t kBitsPerByte = 8;
 static_assert(sizeof(off_t) >= 8, "64-bit file offsets are required");
 std::mutex conversion_mutex;
 using namespace detail;
-
-uint64_t read_le(const uint8_t* bytes, std::size_t size) {
-    uint64_t value = 0;
-    for (std::size_t i = 0; i < size; ++i) {
-        value |= static_cast<uint64_t>(bytes[i]) << (i * kBitsPerByte);
-    }
-    return value;
-}
 
 /// 파일 핸들을 소유하며 범위 읽기·순차 쓰기 오류를 호출자에게 전달한다.
 class File {

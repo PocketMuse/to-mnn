@@ -1,5 +1,6 @@
 #include "tensor_transform.hpp"
 #include "sd15/hqq.hpp"
+#include "byte_io.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -8,7 +9,6 @@
 namespace sd15::detail {
 namespace {
 
-constexpr uint32_t kBitsPerByte = 8;
 constexpr uint32_t kHalfMaxFloatBits = 0x477fe000;
 constexpr uint32_t kHalfSign = 0x8000;
 constexpr uint32_t kHalfSignShift = 16;
@@ -26,14 +26,6 @@ constexpr uint32_t kExponentBiasDifference = 112;
 constexpr uint32_t kFirstHalfSubnormalExponent = 103;
 constexpr uint32_t kMantissaShift = 13;
 constexpr uint32_t kSubnormalShiftBias = 126;
-
-uint64_t read_le(const uint8_t* bytes, std::size_t size) {
-    uint64_t value = 0;
-    for (std::size_t i = 0; i < size; ++i) {
-        value |= static_cast<uint64_t>(bytes[i]) << (i * kBitsPerByte);
-    }
-    return value;
-}
 
 void write_le(uint8_t* bytes, uint32_t value, std::size_t size) {
     for (std::size_t i = 0; i < size; ++i) {

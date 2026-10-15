@@ -2,14 +2,10 @@
 #include "tensor_transform.hpp"
 
 #include <exception>
-#include <stdexcept>
 
 namespace sd15::detail {
 
 HqqWorkers::HqqWorkers(unsigned thread_count) : thread_count_(thread_count) {
-    if (thread_count < 1 || thread_count > kMaxThreadCount) {
-        throw std::invalid_argument("Thread count must be in [1, 8]");
-    }
     try {
         for (unsigned i = 1; i < thread_count_; ++i) {
             threads_[i - 1] = std::thread(&HqqWorkers::worker, this, i);
