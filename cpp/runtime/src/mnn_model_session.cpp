@@ -54,7 +54,6 @@ MnnModelSession::MnnModelSession(const std::filesystem::path& path, std::size_t 
                                  const ModelOptions& options, const GenerationCancellationToken* cancellation)
     : cancellation_(cancellation) {
     check_cancellation(cancellation_);
-    validate_model_options(options);
     if (!std::filesystem::is_regular_file(path)) {
         throw std::runtime_error("Missing model: " + path.string());
     }
@@ -65,10 +64,6 @@ MnnModelSession::MnnModelSession(const std::filesystem::path& path, std::size_t 
     check_cancellation(cancellation_);
     if (cancellation_ != nullptr) {
         interpreter_->setSessionMode(MNN::Interpreter::Session_Debug);
-    }
-    const auto external = path.string() + ".weight";
-    if (std::filesystem::is_regular_file(external)) {
-        interpreter_->setExternalFile(external.c_str());
     }
     MNN::BackendConfig backend;
     backend.precision = precision_mode(options.precision);

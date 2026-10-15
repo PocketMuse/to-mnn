@@ -6,8 +6,6 @@
 #include <stdexcept>
 #include <thread>
 #include <chrono>
-#include <condition_variable>
-#include <mutex>
 #include <iostream>
 
 namespace {
@@ -115,7 +113,8 @@ TEST_CASE("Generation preserves requests seeds and recovery") {
     CHECK(first.rgb != changed.rgb);
 }
 
-TEST_CASE("OpenCL execution cancels and new sessions reproduce outputs") {
+// 명시적으로 선택하는 시간 측정. 타이머는 MNN 콜백 내부 중단을 보장하지 않는다.
+TEST_CASE("OpenCL cancellation latency experiment", "[.][opencl-cancellation-experiment]") {
     using Clock = std::chrono::steady_clock;
     for (const std::string model : {"unet", "vae_decoder"}) {
         const bool unet = model == "unet";
@@ -144,23 +143,12 @@ TEST_CASE("OpenCL execution cancels and new sessions reproduce outputs") {
             sd15::GenerationCancellationToken cancellation;
             sd15::detail::MnnModelSession session(path, unet ? 3 : 1, {}, &cancellation);
             prepare(session);
-            // 모델 로딩·입력 복사를 마친 뒤 실행 중 다른 스레드에서 취소한다.
-            std::mutex mutex;
-            std::condition_variable ready;
-            bool started = false;
+            // 로딩·입력 복사 후 취소를 예약한다. 실제 요청 시점은 스케줄링에 의존한다.
+            const auto start = Clock::now();
             std::thread requester([&] {
-                std::unique_lock<std::mutex> lock(mutex);
-                ready.wait(lock, [&] { return started; });
-                lock.unlock();
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 cancellation.request_cancel();
             });
-            const auto start = Clock::now();
-            {
-                std::lock_guard<std::mutex> lock(mutex);
-                started = true;
-            }
-            ready.notify_one();
             std::exception_ptr failure;
             try {
                 session.run(output_name, output_shape);

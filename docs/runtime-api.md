@@ -37,11 +37,21 @@ bash scripts/build-runtime.sh
 ./build/windows-runtime/runtime/sd15-generation-test.exe --model-dir MODEL_DIR --tokenizer-dir TOKENIZER_DIR
 ```
 
+일반 생성 테스트는 취소·오류 전달과 같은 Runtime의 재생성을 검사한다. 타이머 기반 취소 시간 측정은 기본 실행과 CTest에서 제외하며 필요할 때만 선택한다.
+
+```bash
+./build/windows-runtime/runtime/sd15-generation-test.exe '[opencl-cancellation-experiment]' \
+  --model-dir MODEL_DIR --tokenizer-dir TOKENIZER_DIR
+```
+
+이 실험은 요청 후 취소 예외와 새 세션의 출력 일치를 검사한다. 타이머 요청이 실제 MNN 연산 콜백에서 관찰됐는지까지 보장하지 않는다.
+
 토크나이저 대조 도구는 `--tokenizer-dir DIR --stdin`으로 UTF-8 prompt를 읽고 token IDs만 출력한다.
 
 ## 3. 모델 자원과 실행
 
 모델과 함께 CLIP의 `vocab.json`, `merges.txt`를 배포한다. 변환기는 모델 파일만 만들며 tokenizer는 모델 계열의 공통 자원이다.
+외부 가중치의 `<모델 경로>.weight` 탐색은 MNN `createFromFile`의 기본 동작을 사용한다.
 
 ```text
 model-dir/

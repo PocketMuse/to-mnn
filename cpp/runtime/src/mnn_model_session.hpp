@@ -21,6 +21,7 @@ inline void check_cancellation(const GenerationCancellationToken* cancellation) 
 }
 
 // 모델 종류를 알지 않는다. Interpreter가 Session까지 소유한다.
+// ModelOptions는 Sd15Runtime 생성 시 검증한다.
 class MnnModelSession {
 public:
     MnnModelSession(const std::filesystem::path& path, std::size_t input_count, const ModelOptions& options,
