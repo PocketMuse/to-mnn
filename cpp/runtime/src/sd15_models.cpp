@@ -13,17 +13,6 @@ const std::vector<int> kContextShape{1, kSequenceLength, kHiddenSize};
 
 } // namespace
 
-RuntimeModelOptions resolve_model_options(const RuntimeOptions& options) {
-    RuntimeModelOptions models;
-    models.clip.tuning = options.tuning;
-    models.unet = {options.unet_precision, options.tuning, options.unet_low_memory};
-    models.vae.tuning = options.tuning;
-    validate_model_options(models.unet);
-    validate_model_options(models.clip);
-    validate_model_options(models.vae);
-    return models;
-}
-
 ClipEncoder::ClipEncoder(const std::filesystem::path& path, const ModelOptions& options) : session_(path, 1, options) {
 }
 

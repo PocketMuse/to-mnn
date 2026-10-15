@@ -72,7 +72,7 @@ Sd15Runtime                  # 생성 순서·CFG/DDIM·단계별 수명
 
 * `sd15_models.hpp/.cpp`: 모델별 입출력 계약. 공통 `ModelOptions`를 각각 전달한다.
 * `mnn_model_session.hpp/.cpp`: 모델 종류를 모르는 공통 MNN 실행 처리.
-* `resolve_model_options`에서 공개 `RuntimeOptions`를 CLIP·UNet·VAE 설정으로 한 번 변환한다. 공개 API·CLI는 유지한다.
+* 공개 `RuntimeOptions`의 `clip`·`unet`·`vae`는 공통 `ModelOptions`다. 별도 내부 설정 구조체나 변환 함수 없이 모델에 직접 전달한다.
 * 세 모델은 `generate()`의 단계별 지역 객체이며 동시에 상주하지 않는다. 설정·tokenizer만 Runtime 수명 동안 유지한다.
 
 현재 의존성:

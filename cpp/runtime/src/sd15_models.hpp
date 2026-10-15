@@ -4,15 +4,6 @@
 
 namespace sd15::detail {
 
-struct RuntimeModelOptions {
-    ModelOptions clip;
-    ModelOptions unet;
-    ModelOptions vae;
-};
-
-// 공개 설정을 모델별 설정으로 한 번만 변환한다.
-RuntimeModelOptions resolve_model_options(const RuntimeOptions& options);
-
 class ClipEncoder {
 public:
     ClipEncoder(const std::filesystem::path& path, const ModelOptions& options);

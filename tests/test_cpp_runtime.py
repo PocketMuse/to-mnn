@@ -19,6 +19,9 @@ class RuntimeCliTest(unittest.TestCase):
         self.assertIn("--unet-precision", result.stdout)
         self.assertIn("--tuning", result.stdout)
         self.assertIn("--unet-low-memory", result.stdout)
+        for model in ("clip", "unet", "vae"):
+            for option in ("precision", "tuning", "low-memory"):
+                self.assertIn(f"--{model}-{option}", result.stdout)
         self.assertNotIn("--input", result.stdout)
 
     def test_invalid_generation_options_are_rejected(self):
@@ -90,6 +93,58 @@ class RuntimeCliTest(unittest.TestCase):
                         )
                         self.assertEqual(result.returncode, 1)
                         self.assertIn("Missing model:", result.stderr)
+
+    def test_model_options_are_independent_and_override_shared_tuning(self):
+        with tempfile.TemporaryDirectory() as root:
+            common = [
+                os.environ["SD15_RUNTIME"],
+                "--model-dir",
+                root,
+                "--prompt",
+                "",
+                "--output",
+                str(Path(root) / "out.png"),
+            ]
+            overrides = [
+                "--clip-precision",
+                "normal",
+                "--vae-precision",
+                "low",
+                "--unet-tuning",
+                "none",
+                "--vae-tuning",
+                "wide",
+                "--clip-low-memory",
+                "--vae-low-memory",
+            ]
+            for flags in (
+                ["--tuning", "fast"] + overrides,
+                overrides + ["--tuning", "fast"],
+            ):
+                result = subprocess.run(common + flags, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(
+                    "clip requested: precision=normal, tuning=fast, low-memory=1",
+                    result.stdout,
+                )
+                self.assertIn(
+                    "unet requested: precision=high, tuning=none, low-memory=0",
+                    result.stdout,
+                )
+                self.assertIn(
+                    "vae requested: precision=low, tuning=wide, low-memory=1",
+                    result.stdout,
+                )
+                self.assertNotIn("not expected", result.stderr)
+            for model in ("clip", "unet", "vae"):
+                for option in ("precision", "tuning"):
+                    flag = f"--{model}-{option}"
+                    result = subprocess.run(
+                        common + [flag, "invalid"], capture_output=True, text=True
+                    )
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn(flag, result.stderr)
+                    self.assertNotIn("requested:", result.stdout)
 
     def test_empty_and_unicode_prompts_pass_parsing(self):
         with tempfile.TemporaryDirectory() as root:

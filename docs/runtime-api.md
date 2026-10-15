@@ -79,17 +79,19 @@ cp "$cache/snapshots/$revision/tokenizer/"{vocab.json,merges.txt} \
 ## 4. C++ API와 수명
 
 실행 옵션은 `RuntimeOptions`에서 지정하며 인스턴스 생성 후 고정된다.
-내부에서는 모델별 공통 `ModelOptions`로 변환한다. `ClipEncoder`·`UNetDenoiser`·`VaeDecoder`가 입출력 계약을, `MnnModelSession`이 MNN 설정과 세션을 담당한다. 이 클래스들은 내부 구현이며 공개 API는 아래와 같다.
+공개 `ModelOptions`를 `clip`, `unet`, `vae`에 각각 지정한다. `ClipEncoder`·`UNetDenoiser`·`VaeDecoder`는 이 설정을 공통 `MnnModelSession`에 직접 전달한다.
 
-| 필드 | 값 / 기본값 | CLI |
+| 모델별 필드 | 값 / 기본값 | CLI (`MODEL` = clip, unet, vae) |
 | --- | --- | --- |
-| `unet_precision` | `Precision::High`(기본), `Normal`, `Low` | `--unet-precision high\|normal\|low` |
-| `tuning` | `Tuning::None`(기본), `Fast`, `Normal`, `Wide` | `--tuning none\|fast\|normal\|wide` |
-| `unet_low_memory` | `false`(기본), `true` | `--unet-low-memory` |
+| `precision` | `Precision::High`(기본), `Normal`, `Low` | `--MODEL-precision high\|normal\|low` |
+| `tuning` | `Tuning::None`(기본), `Fast`, `Normal`, `Wide` | `--MODEL-tuning none\|fast\|normal\|wide` |
+| `low_memory` | `false`(기본), `true` | `--MODEL-low-memory` |
 
-* 정밀도·low-memory는 UNet에만 적용. CLIP/VAE는 high/normal-memory 유지. 튜닝은 세 모델 모두 적용하며 저장 방식은 buffer 고정.
+* CLI의 기존 `--tuning`은 세 모델의 공통 기본값이다. `--MODEL-tuning`은 명령행 순서와 관계없이 해당 모델에 우선 적용하며 명시적 `none`도 유효하다.
+* 각 모델에 요청한 설정을 실행 전에 출력한다. FP16 미지원 시 high로 전환되므로 실제 실행 정밀도와는 다를 수 있다.
+* 모든 모델의 기본값은 high / none / low-memory off이며 저장 방식은 buffer 고정이다.
+* CLIP/VAE의 FP16 파일에 low-memory를 켠다고 W8로 양자화되지는 않는다. 효과는 모델의 저장 형식과 백엔드에 따라 다르다.
 * OpenCL 기본 커널 설정은 High=FP32 저장·계산, Normal=FP16 저장·FP32 계산, Low=FP16 저장·계산. 개별 커널의 일부 계산은 다를 수 있다.
-* FP16 미지원 GPU에서는 MNN이 high로 전환한다.
 * low-memory는 압축 가중치 실행 경로이며 네이티브 INT8 연산을 보장하지 않는다.
 * `build-mnn.sh`는 `MNN_LOW_MEMORY=ON`으로 빌드한다. Runtime configure는 `MNN_RUNTIME_DIR/CMakeCache.txt`에서 지원 여부를 확인하며, ON을 확인하지 못한 빌드는 low-memory 요청을 거부한다. 엔진 재빌드 후 Runtime도 다시 configure/build한다.
 * 디스크 캐시는 사용하지 않는다. 튜닝 비용이 생성 시간에 포함되므로 전체 시간과 반복 denoising 시간을 구분한다.
@@ -97,10 +99,13 @@ cp "$cache/snapshots/$revision/tokenizer/"{vocab.json,merges.txt} \
 ```cpp
 sd15::RuntimeOptions config;
 config.model_dir = "models/sd15";
-config.unet_precision = sd15::Precision::Normal;
-config.tuning = sd15::Tuning::Fast;
-config.unet_low_memory = true;
+config.clip.precision = sd15::Precision::Normal;
+config.unet.tuning = sd15::Tuning::Fast;
+config.unet.low_memory = true;
+config.vae.precision = sd15::Precision::High;
 ```
+
+C++ API 변경: `unet_precision` → `unet.precision`, `unet_low_memory` → `unet.low_memory`. 기존 공통 `tuning`은 `clip.tuning`, `unet.tuning`, `vae.tuning`에 각각 지정한다. C++ 호출 코드는 수정 후 다시 빌드해야 한다. 기존 CLI 옵션은 유지한다.
 
 헤더: [runtime.hpp](../cpp/runtime/include/sd15/runtime.hpp)
 

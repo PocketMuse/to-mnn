@@ -12,12 +12,6 @@
 
 namespace sd15::detail {
 
-struct ModelOptions {
-    Precision precision = Precision::High;
-    Tuning tuning = Tuning::None;
-    bool low_memory = false;
-};
-
 void validate_model_options(const ModelOptions& options);
 void validate_mnn_version();
 

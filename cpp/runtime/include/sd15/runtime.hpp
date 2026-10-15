@@ -25,14 +25,20 @@ struct GenerateOptions {
 enum class Precision { High, Normal, Low };
 enum class Tuning { None, Fast, Normal, Wide };
 
+struct ModelOptions {
+    Precision precision = Precision::High;
+    Tuning tuning = Tuning::None;
+    // MNN_LOW_MEMORY 빌드가 필요하다. 정수 연산을 보장하지 않는다.
+    bool low_memory = false;
+};
+
 struct RuntimeOptions {
     std::string model_dir;
     // 비어 있으면 model_dir/tokenizer의 vocab.json·merges.txt를 사용한다.
     std::string tokenizer_dir;
-    Precision unet_precision = Precision::High;
-    Tuning tuning = Tuning::None;
-    // MNN_LOW_MEMORY로 빌드한 엔진이 필요하다. 정수 연산을 보장하지 않는다.
-    bool unet_low_memory = false;
+    ModelOptions clip;
+    ModelOptions unet;
+    ModelOptions vae;
 };
 
 struct Image {

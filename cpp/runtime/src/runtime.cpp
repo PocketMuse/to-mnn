@@ -12,18 +12,20 @@
 namespace sd15 {
 
 struct Sd15Runtime::Impl {
-    Impl(const RuntimeOptions& options, const detail::RuntimeModelOptions& models)
-        : config(models), root(options.model_dir),
+    explicit Impl(const RuntimeOptions& options)
+        : config(options), root(options.model_dir),
           tokenizer(options.tokenizer_dir.empty() ? (root / "tokenizer").string() : options.tokenizer_dir) {}
 
-    const detail::RuntimeModelOptions config;
+    const RuntimeOptions config;
     const std::filesystem::path root;
     const detail::ClipTokenizer tokenizer;
     std::atomic_flag busy = ATOMIC_FLAG_INIT;
 };
 
 Sd15Runtime::Sd15Runtime(const RuntimeOptions& options) {
-    const auto models = detail::resolve_model_options(options);
+    detail::validate_model_options(options.clip);
+    detail::validate_model_options(options.unet);
+    detail::validate_model_options(options.vae);
     if (options.model_dir.empty()) {
         throw std::invalid_argument("Model directory is required");
     }
@@ -34,7 +36,7 @@ Sd15Runtime::Sd15Runtime(const RuntimeOptions& options) {
             throw std::runtime_error("Missing model: " + (root / name).string());
         }
     }
-    impl_ = std::make_unique<Impl>(options, models);
+    impl_ = std::make_unique<Impl>(options);
 }
 
 Sd15Runtime::~Sd15Runtime() = default;

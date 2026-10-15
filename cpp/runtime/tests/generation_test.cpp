@@ -12,16 +12,18 @@ struct Interrupted {};
 
 // 실제 모델·Windows OpenCL을 사용하는 선택적 통합 테스트.
 TEST_CASE("Generation preserves requests seeds and recovery") {
-    sd15::RuntimeOptions invalid_config{model_dir, tokenizer_dir};
-    invalid_config.unet_precision = static_cast<sd15::Precision>(-1);
-    REQUIRE_THROWS_AS(sd15::Sd15Runtime(invalid_config), std::invalid_argument);
-    invalid_config.unet_precision = sd15::Precision::High;
-    invalid_config.tuning = static_cast<sd15::Tuning>(-1);
-    REQUIRE_THROWS_AS(sd15::Sd15Runtime(invalid_config), std::invalid_argument);
+    for (auto member : {&sd15::RuntimeOptions::clip, &sd15::RuntimeOptions::unet, &sd15::RuntimeOptions::vae}) {
+        sd15::RuntimeOptions invalid_config{model_dir, tokenizer_dir};
+        (invalid_config.*member).precision = static_cast<sd15::Precision>(-1);
+        REQUIRE_THROWS_AS(sd15::Sd15Runtime(invalid_config), std::invalid_argument);
+        (invalid_config.*member).precision = sd15::Precision::High;
+        (invalid_config.*member).tuning = static_cast<sd15::Tuning>(-1);
+        REQUIRE_THROWS_AS(sd15::Sd15Runtime(invalid_config), std::invalid_argument);
+    }
     sd15::RuntimeOptions config{model_dir, tokenizer_dir};
     sd15::Sd15Runtime runtime(config);
     // 생성 후 호출자가 설정을 바꿔도 Runtime의 설정은 유지한다.
-    config.unet_precision = static_cast<sd15::Precision>(-1);
+    config.unet.precision = static_cast<sd15::Precision>(-1);
     sd15::GenerateOptions request;
     request.prompt = "a photo of a cat";
     request.negative_prompt = "blurry";
