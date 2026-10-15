@@ -8,6 +8,13 @@ FORMAT_NAME = "sd15-mnn-template"
 COMPONENTS = ("text_encoder", "unet", "vae_decoder")
 CHUNK_BYTES = 1024 * 1024
 HALF_MAX = 65504.0
+STORAGE_DTYPES = {
+    "F16": np.dtype("<f2"),
+    "F32": np.dtype("<f4"),
+    "I32": np.dtype("<i4"),
+    "I64": np.dtype("<i8"),
+    "U8": np.dtype("u1"),
+}
 
 
 def encode_tensor(values, dtype, positive_zero):

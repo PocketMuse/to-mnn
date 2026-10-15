@@ -91,12 +91,14 @@ def classify(model, sources, index, shapes, provenance=None):
     """
     regions = defaultdict(list)
     covered = set()
+    weight_shapes = {}
+    for slot in model.slots:
+        if slot.field == "Weight":
+            weight_shapes.setdefault(slot.op, slot.shape)
     for slot in model.slots:
         if slot.quantization is not None:
             mapping = (provenance or {}).get((slot.op, "Weight"))
-            if mapping is None or mapping["shape"] != next(
-                s.shape for s in model.slots if s.op == slot.op and s.field == "Weight"
-            ):
+            if mapping is None or mapping["shape"] != weight_shapes.get(slot.op):
                 raise ValueError(f"{slot.op}: missing or incompatible float provenance")
             key = mapping["key"]
             if key not in sources:
@@ -216,6 +218,10 @@ def generate(
 
     기존 출력은 덮어쓰지 않으며 실패 시 이번 생성물만 제거한다.
     """
+    if unet_quantization is not None and (
+        unet_quantization != "hqq-b128" or reference_mnn_dir is None
+    ):
+        raise ValueError("HQQ/B128 requires an FP16 reference MNN directory")
     required = [checkpoint]
     for component in COMPONENTS:
         required.extend(
@@ -247,10 +253,6 @@ def generate(
                 gc.collect()
                 provenance = None
                 if component == "unet" and unet_quantization is not None:
-                    if unet_quantization != "hqq-b128" or reference_mnn_dir is None:
-                        raise ValueError(
-                            "HQQ/B128 requires an FP16 reference MNN directory"
-                        )
                     with MnnModel(reference_mnn_dir / "unet.mnn") as reference:
                         reference_regions = classify(
                             reference, sources, stored_index, shapes

@@ -58,6 +58,25 @@ class TemplateGenerationTest(unittest.TestCase):
         index.assert_not_called()
         self.assertFalse(self.output.exists())
 
+    def test_invalid_quantization_fails_before_indexing_weights(self):
+        for quantization, reference in (("unsupported", self.mnn), ("hqq-b128", None)):
+            with self.subTest(quantization=quantization, reference=reference):
+                with patch(
+                    "src.sd15.gen_template.index_source",
+                    side_effect=AssertionError("Weights must not be indexed"),
+                ) as index:
+                    with self.assertRaisesRegex(ValueError, "HQQ/B128"):
+                        generate(
+                            self.checkpoint,
+                            self.onnx,
+                            self.mnn,
+                            self.output,
+                            unet_quantization=quantization,
+                            reference_mnn_dir=reference,
+                        )
+                index.assert_not_called()
+                self.assertFalse(self.output.exists())
+
     def test_zero_valued_learned_tensor_remains_a_parameter(self):
         generate(self.checkpoint, self.onnx, self.mnn, self.output)
         manifest = json.loads((self.output / "manifest.json").read_text())

@@ -16,7 +16,7 @@ from mnn_schema.MatMul import MatMul
 from mnn_schema.Net import Net
 from mnn_schema.OpParameter import OpParameter
 
-from .template_values import MNN_VERSION
+from .template_values import MNN_VERSION, STORAGE_DTYPES
 
 FP16_QUANT_TYPE = 3
 DENSE_QUANT_TYPE = 1
@@ -94,8 +94,7 @@ class MnnModel:
             """비어 있지 않은 텐서의 크기와 파일 범위를 검증해 등록한다."""
             if not size:
                 return
-            widths = {"F16": 2, "F32": 4, "I32": 4, "I64": 8, "U8": 1}
-            if size != int(np.prod(shape, dtype=object)) * widths[dtype]:
+            if size != math.prod(shape) * STORAGE_DTYPES[dtype].itemsize:
                 raise ValueError(f"{op}/{field}: shape and byte length disagree")
             if (
                 file not in self.buffers

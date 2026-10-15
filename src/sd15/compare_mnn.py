@@ -7,9 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from .mnn_tensors import MnnModel
-from .template_values import CHUNK_BYTES, COMPONENTS
-
-DTYPES = {"F16": "<f2", "F32": "<f4", "I32": "<i4", "I64": "<i8", "U8": "u1"}
+from .template_values import CHUNK_BYTES, COMPONENTS, STORAGE_DTYPES
 
 
 def compare_slot(reference, candidate, left, right):
@@ -33,7 +31,7 @@ def compare_slot(reference, candidate, left, right):
             "actual_dtype": right.dtype,
             "actual_bytes": right.size,
         }
-    dtype = np.dtype(DTYPES[left.dtype])
+    dtype = STORAGE_DTYPES[left.dtype]
     max_error = 0.0
     for cursor in range(0, left.size, CHUNK_BYTES):
         size = min(CHUNK_BYTES, left.size - cursor)
