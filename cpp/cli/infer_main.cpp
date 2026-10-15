@@ -19,12 +19,21 @@ template <typename Char> int run(int argc, const Char* const* argv) {
         sd15::RuntimeOptions runtime_options;
         sd15::GenerateOptions options;
         std::string output_name;
+        std::string precision = "high";
+        std::string tuning = "none";
         CLI::App app{"Generate an SD1.5 image with OpenCL"};
         const CLI::Validator nonempty(
             [](const std::string& value) { return value.empty() ? "Value must not be empty" : ""; }, "NONEMPTY");
         app.option_defaults()->take_last();
         app.add_option("--model-dir", runtime_options.model_dir, "Model directory")->required()->check(nonempty);
         app.add_option("--tokenizer-dir", runtime_options.tokenizer_dir, "Optional tokenizer directory");
+        app.add_option("--unet-precision", precision, "UNet compute/storage precision")
+            ->check(CLI::IsMember({"high", "normal", "low"}))
+            ->capture_default_str();
+        app.add_option("--tuning", tuning, "OpenCL tuning for all models")
+            ->check(CLI::IsMember({"none", "fast", "normal", "wide"}))
+            ->capture_default_str();
+        app.add_flag("--unet-low-memory", runtime_options.unet_low_memory, "Use quantized-weight low-memory path");
         app.add_option("--prompt", options.prompt, "Prompt (UTF-8; may be empty)")->required();
         app.add_option("--negative-prompt", options.negative_prompt, "Negative prompt");
         app.add_option("--seed", options.seed, "Negative: random; otherwise uint32 seed")
@@ -40,6 +49,13 @@ template <typename Char> int run(int argc, const Char* const* argv) {
             app.exit(error);
             return error.get_exit_code() == 0 ? 0 : 1;
         }
+        runtime_options.unet_precision = precision == "high"     ? sd15::Precision::High
+                                         : precision == "normal" ? sd15::Precision::Normal
+                                                                 : sd15::Precision::Low;
+        runtime_options.tuning = tuning == "none"     ? sd15::Tuning::None
+                                 : tuning == "fast"   ? sd15::Tuning::Fast
+                                 : tuning == "normal" ? sd15::Tuning::Normal
+                                                      : sd15::Tuning::Wide;
         if (!std::isfinite(options.guidance)) {
             throw std::invalid_argument("Guidance must be finite");
         }
@@ -77,7 +93,8 @@ template <typename Char> int run(int argc, const Char* const* argv) {
         }
         const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         std::cout << "Saved " << output.u8string() << " (" << image.width << "x" << image.height << "), " << elapsed
-                  << "s, seed=" << image.seed << ", OpenCL high/buffer/tuning-none\n";
+                  << "s, seed=" << image.seed << ", OpenCL buffer, unet-precision=" << precision
+                  << ", tuning=" << tuning << ", unet-low-memory=" << runtime_options.unet_low_memory << '\n';
     }
     catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

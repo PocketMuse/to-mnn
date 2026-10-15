@@ -4,7 +4,7 @@
 
 * C++17 정적 라이브러리 `sd15_runtime`, 동기 클래스 `Sd15Runtime`, CLI `sd15-infer`
 * prompt·negative prompt·seed → C++ 토큰화·초기 노이즈 → CLIP → UNet → VAE → RGB8
-* Windows 네이티브 MNN 3.6.1, OpenCL high precision / buffer / tuning none
+* Windows 네이티브 MNN 3.6.1, 기본 OpenCL high precision / buffer / tuning none
 * SD1.5, batch 1, 512×512, CFG + DDIM eta=0. steps 1~999, 기본 20, guidance 기본 7.5
 * scaled-linear/epsilon, train steps 1000, beta 0.00085~0.012, offset 1, alpha-to-one false, VAE scale 0.18215 고정
 * 필요한 모델만 순서대로 로딩·실행·해제. 생성 간 무거운 모델은 보관하지 않음
@@ -77,6 +77,29 @@ cp "$cache/snapshots/$revision/tokenizer/"{vocab.json,merges.txt} \
 * CLI11로 옵션을 파싱하며 `--help`로 사용법 확인. Windows Unicode 명령행의 UTF-8 변환도 CLI11이 처리. MNN 모델 경로는 현재 ASCII 경로 사용
 
 ## 4. C++ API와 수명
+
+실행 옵션은 `RuntimeOptions`에서 지정하며 인스턴스 생성 후 고정된다.
+
+| 필드 | 값 / 기본값 | CLI |
+| --- | --- | --- |
+| `unet_precision` | `Precision::High`(기본), `Normal`, `Low` | `--unet-precision high\|normal\|low` |
+| `tuning` | `Tuning::None`(기본), `Fast`, `Normal`, `Wide` | `--tuning none\|fast\|normal\|wide` |
+| `unet_low_memory` | `false`(기본), `true` | `--unet-low-memory` |
+
+* 정밀도·low-memory는 UNet에만 적용. CLIP/VAE는 high/normal-memory 유지. 튜닝은 세 모델 모두 적용하며 저장 방식은 buffer 고정.
+* OpenCL 기본 커널 설정은 High=FP32 저장·계산, Normal=FP16 저장·FP32 계산, Low=FP16 저장·계산. 개별 커널의 일부 계산은 다를 수 있다.
+* FP16 미지원 GPU에서는 MNN이 high로 전환한다.
+* low-memory는 압축 가중치 실행 경로이며 네이티브 INT8 연산을 보장하지 않는다.
+* `build-mnn.sh`는 `MNN_LOW_MEMORY=ON`으로 빌드한다. Runtime configure는 `MNN_RUNTIME_DIR/CMakeCache.txt`에서 지원 여부를 확인하며, ON을 확인하지 못한 빌드는 low-memory 요청을 거부한다. 엔진 재빌드 후 Runtime도 다시 configure/build한다.
+* 디스크 캐시는 사용하지 않는다. 튜닝 비용이 생성 시간에 포함되므로 전체 시간과 반복 denoising 시간을 구분한다.
+
+```cpp
+sd15::RuntimeOptions config;
+config.model_dir = "models/sd15";
+config.unet_precision = sd15::Precision::Normal;
+config.tuning = sd15::Tuning::Fast;
+config.unet_low_memory = true;
+```
 
 헤더: [runtime.hpp](../cpp/runtime/include/sd15/runtime.hpp)
 

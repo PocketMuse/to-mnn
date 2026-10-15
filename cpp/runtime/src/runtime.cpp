@@ -21,10 +21,37 @@ constexpr float kVaeScalingFactor = 0.18215f;
 const std::vector<int> kLatentShape{1, 4, 64, 64};
 const std::vector<int> kContextShape{1, kSequenceLength, kHiddenSize};
 
+MNN::BackendConfig::PrecisionMode precision_mode(Precision value) {
+    switch (value) {
+    case Precision::High:
+        return MNN::BackendConfig::Precision_High;
+    case Precision::Normal:
+        return MNN::BackendConfig::Precision_Normal;
+    case Precision::Low:
+        return MNN::BackendConfig::Precision_Low;
+    }
+    throw std::invalid_argument("Invalid UNet precision");
+}
+
+int tuning_mode(Tuning value) {
+    switch (value) {
+    case Tuning::None:
+        return MNN_GPU_TUNING_NONE;
+    case Tuning::Fast:
+        return MNN_GPU_TUNING_FAST;
+    case Tuning::Normal:
+        return MNN_GPU_TUNING_NORMAL;
+    case Tuning::Wide:
+        return MNN_GPU_TUNING_WIDE;
+    }
+    throw std::invalid_argument("Invalid tuning mode");
+}
+
 // Interpreter가 Session까지 소유한다. 단계 종료 시 엔진에 자원을 반환한다.
 class Model {
 public:
-    Model(const std::filesystem::path& path, std::size_t input_count) {
+    Model(const std::filesystem::path& path, std::size_t input_count, const RuntimeOptions& options,
+          bool unet = false) {
         if (!std::filesystem::is_regular_file(path)) {
             throw std::runtime_error("Missing model: " + path.string());
         }
@@ -37,10 +64,12 @@ public:
             interpreter_->setExternalFile(external.c_str());
         }
         MNN::BackendConfig backend;
-        backend.precision = MNN::BackendConfig::Precision_High;
+        backend.precision = unet ? precision_mode(options.unet_precision) : MNN::BackendConfig::Precision_High;
+        backend.memory =
+            unet && options.unet_low_memory ? MNN::BackendConfig::Memory_Low : MNN::BackendConfig::Memory_Normal;
         MNN::ScheduleConfig config;
         config.type = MNN_FORWARD_OPENCL;
-        config.mode = MNN_GPU_TUNING_NONE | MNN_GPU_MEMORY_BUFFER;
+        config.mode = tuning_mode(options.tuning) | MNN_GPU_MEMORY_BUFFER;
         config.backendConfig = &backend;
         session_ = interpreter_->createSession(config);
         if (session_ == nullptr) {
@@ -110,15 +139,23 @@ private:
 
 struct Sd15Runtime::Impl {
     explicit Impl(const RuntimeOptions& options)
-        : root(options.model_dir),
+        : config(options), root(options.model_dir),
           tokenizer(options.tokenizer_dir.empty() ? (root / "tokenizer").string() : options.tokenizer_dir) {}
 
+    const RuntimeOptions config;
     const std::filesystem::path root;
     const detail::ClipTokenizer tokenizer;
     std::atomic_flag busy = ATOMIC_FLAG_INIT;
 };
 
 Sd15Runtime::Sd15Runtime(const RuntimeOptions& options) {
+    precision_mode(options.unet_precision);
+    tuning_mode(options.tuning);
+#ifndef SD15_MNN_LOW_MEMORY
+    if (options.unet_low_memory) {
+        throw std::invalid_argument("UNet low-memory requires an MNN_LOW_MEMORY build");
+    }
+#endif
     if (options.model_dir.empty()) {
         throw std::invalid_argument("Model directory is required");
     }
@@ -163,7 +200,7 @@ Image Sd15Runtime::generate(const GenerateOptions& request, const InferenceProgr
     std::vector<float> context;
     {
         notify("text_encoder");
-        Model encoder(root / "text_encoder.mnn", 1);
+        Model encoder(root / "text_encoder.mnn", 1, impl_->config);
         encoder.input("input_ids", {1, kSequenceLength}, negative_tokens);
         negative_context = encoder.run("last_hidden_state", kContextShape);
         encoder.input("input_ids", {1, kSequenceLength}, tokens);
@@ -172,7 +209,7 @@ Image Sd15Runtime::generate(const GenerateOptions& request, const InferenceProgr
     auto latent = detail::initial_noise(seed);
     {
         notify("unet");
-        Model unet(root / "unet.mnn", 3);
+        Model unet(root / "unet.mnn", 3, impl_->config, true);
         for (int i = 0; i < options.steps; ++i) {
             const int time = times[i];
             unet.input("sample", kLatentShape, latent);
@@ -198,7 +235,7 @@ Image Sd15Runtime::generate(const GenerateOptions& request, const InferenceProgr
             throw std::runtime_error("Non-finite VAE input");
         }
     }
-    Model decoder(root / "vae_decoder.mnn", 1);
+    Model decoder(root / "vae_decoder.mnn", 1, impl_->config);
     decoder.input("latent_sample", kLatentShape, latent);
     auto image = detail::pixels(decoder.run("sample", {1, 3, kImageSize, kImageSize}));
     image.seed = seed;

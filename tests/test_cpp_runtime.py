@@ -16,6 +16,9 @@ class RuntimeCliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--model-dir", result.stdout)
         self.assertIn("--prompt", result.stdout)
+        self.assertIn("--unet-precision", result.stdout)
+        self.assertIn("--tuning", result.stdout)
+        self.assertIn("--unet-low-memory", result.stdout)
         self.assertNotIn("--input", result.stdout)
 
     def test_invalid_generation_options_are_rejected(self):
@@ -30,6 +33,8 @@ class RuntimeCliTest(unittest.TestCase):
                 ("--guidance", "inf", "finite"),
                 ("--guidance", "7.5junk", "--guidance"),
                 ("--input", "old.json", "--input"),
+                ("--unet-precision", "int8", "--unet-precision"),
+                ("--tuning", "invalid", "--tuning"),
             ]:
                 with self.subTest(flag=flag, value=value):
                     result = subprocess.run(
@@ -60,6 +65,31 @@ class RuntimeCliTest(unittest.TestCase):
                 result = subprocess.run(args, capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("--model-dir", result.stderr)
+
+    def test_runtime_options_pass_parsing(self):
+        with tempfile.TemporaryDirectory() as root:
+            for precision in ("high", "normal", "low"):
+                for tuning in ("none", "fast", "normal", "wide"):
+                    with self.subTest(precision=precision, tuning=tuning):
+                        result = subprocess.run(
+                            [
+                                os.environ["SD15_RUNTIME"],
+                                "--model-dir",
+                                root,
+                                "--prompt",
+                                "",
+                                "--output",
+                                str(Path(root) / "out.png"),
+                                "--unet-precision",
+                                precision,
+                                "--tuning",
+                                tuning,
+                            ],
+                            capture_output=True,
+                            text=True,
+                        )
+                        self.assertEqual(result.returncode, 1)
+                        self.assertIn("Missing model:", result.stderr)
 
     def test_empty_and_unicode_prompts_pass_parsing(self):
         with tempfile.TemporaryDirectory() as root:

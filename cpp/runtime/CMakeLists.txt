@@ -7,6 +7,13 @@ add_library(sd15_runtime STATIC src/runtime.cpp src/diffusion.cpp src/clip_token
 target_include_directories(sd15_runtime PUBLIC include)
 target_link_libraries(sd15_runtime PRIVATE sd15_mnn ICU::uc ICU::i18n nlohmann_json::nlohmann_json)
 target_compile_features(sd15_runtime PUBLIC cxx_std_17)
+# 준비된 엔진의 빌드 설정을 확인한다. 옵션이 조용히 무시되는 것을 방지한다.
+if(EXISTS "${MNN_RUNTIME_DIR}/CMakeCache.txt")
+    file(STRINGS "${MNN_RUNTIME_DIR}/CMakeCache.txt" mnn_low_memory REGEX "^MNN_LOW_MEMORY:BOOL=(ON|TRUE|1)$")
+    if(mnn_low_memory)
+        target_compile_definitions(sd15_runtime PRIVATE SD15_MNN_LOW_MEMORY)
+    endif()
+endif()
 if(MSVC)
     target_compile_options(sd15_runtime PRIVATE /W4 /utf-8 /fp:strict)
     target_compile_definitions(sd15_runtime PRIVATE NOMINMAX)
