@@ -326,7 +326,7 @@ bool write_quantized(File& source, File& output, const ConversionTask& task, std
 
 /// 쓰기 없이 입력과 템플릿을 검증하고 출력 계획을 만든다.
 bool prepare(const ConvertOptions& options, File& checkpoint, File& template_file, ConversionPlan& plan,
-             InspectResult& info, ConvertError& error) {
+             ConvertError& error) {
     try {
         if (options.thread_count < 1 || options.thread_count > kMaxThreadCount) {
             return fail(error, ErrorCode::InvalidInput, "Thread count must be in [1, 8]");
@@ -347,7 +347,6 @@ bool prepare(const ConvertOptions& options, File& checkpoint, File& template_fil
         if (!fs::is_directory(parent)) {
             return fail(error, ErrorCode::InvalidInput, "Output parent directory must exist", parent.string());
         }
-        info.partial_exists = fs::symlink_status(options.output_dir + ".partial").type() != fs::file_type::not_found;
         File manifest_file;
         const fs::path template_dir(options.template_dir);
         if (!checkpoint.open(options.checkpoint, "rb", error) ||
@@ -388,25 +387,13 @@ bool prepare(const ConvertOptions& options, File& checkpoint, File& template_fil
                 return false;
             }
         }
-        info.manifest_version = plan.manifest_version;
-        info.mnn_version = plan.mnn_version;
-        info.unet_quantization = plan.unet_quantization;
-        info.output_bytes = plan.output_bytes;
-        if (plan.has_hqq) {
-            info.hqq_iterations = options.hqq_iterations;
-        }
-        for (const auto& file : plan.files) {
-            info.files.push_back({file.name, file.size});
-        }
         const auto space = fs::space(parent, ec);
         if (!ec && space.available != static_cast<uintmax_t>(-1)) {
-            info.available_bytes = space.available;
-            if (space.available < info.output_bytes) {
+            if (space.available < plan.output_bytes) {
                 return fail(error, ErrorCode::InsufficientSpace, "Insufficient output disk space", parent.string());
             }
         }
         error = {};
-        info.ok = true;
         return true;
     }
     catch (const fs::filesystem_error& exception) {
@@ -465,17 +452,18 @@ void run(const ConvertOptions& options, Progress& progress, OutputDirectory& sta
     File checkpoint;
     File template_file;
     ConversionPlan plan;
-    InspectResult info;
-    if (!prepare(options, checkpoint, template_file, plan, info, error)) {
+    if (!prepare(options, checkpoint, template_file, plan, error)) {
         return;
     }
     progress.check();
-    if (info.partial_exists) {
+    if (fs::symlink_status(options.output_dir + ".partial").type() != fs::file_type::not_found) {
         fail(error, ErrorCode::StaleOutput, "Staging directory already exists", options.output_dir + ".partial");
         return;
     }
-    progress.value.total_bytes = info.output_bytes;
-    result.hqq_iterations = info.hqq_iterations;
+    progress.value.total_bytes = plan.output_bytes;
+    if (plan.has_hqq) {
+        result.hqq_iterations = options.hqq_iterations;
+    }
     for (const auto& file : plan.files) {
         for (const auto& task : file.tasks) {
             const auto work = task.kind == TaskKind::Float
@@ -521,7 +509,9 @@ void run(const ConvertOptions& options, Progress& progress, OutputDirectory& sta
     progress.value.stage = ConvertStage::Finalizing;
     progress.emit(true);
     progress.check();
-    result.files = std::move(info.files);
+    for (const auto& file : plan.files) {
+        result.files.push_back({file.name, file.size});
+    }
     if (!staging.publish(options.output_dir, error)) {
         return;
     }
@@ -536,27 +526,6 @@ void run(const ConvertOptions& options, Progress& progress, OutputDirectory& sta
 }
 
 } // namespace
-
-InspectResult inspect(const ConvertOptions& options) {
-    InspectResult result;
-    try {
-        File checkpoint;
-        File template_file;
-        ConversionPlan plan;
-        prepare(options, checkpoint, template_file, plan, result, result.error);
-    }
-    catch (const std::bad_alloc&) {
-        result.error.code = ErrorCode::OutOfMemory;
-        result.error.message.clear();
-    }
-    catch (const std::exception& exception) {
-        capture_exception(result.error, ErrorCode::InternalError, exception);
-    }
-    catch (...) {
-        result.error.code = ErrorCode::InternalError;
-    }
-    return result;
-}
 
 ConvertResult convert(const ConvertOptions& options, const ProgressCallback& on_progress,
                       const CancellationToken& cancellation) {

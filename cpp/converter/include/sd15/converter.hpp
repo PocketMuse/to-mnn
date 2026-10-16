@@ -61,22 +61,6 @@ struct OutputFile {
     uint64_t size_bytes = 0;
 };
 
-struct InspectResult {
-    bool ok = false;
-    std::string model_family = "sd15";
-    int manifest_version = 0;
-    std::string mnn_version;
-    /// manifest의 정책 식별자. 개별 텐서의 저장 dtype은 혼합될 수 있다.
-    std::string unet_quantization;
-    std::vector<OutputFile> files;
-    uint64_t output_bytes = 0;
-    std::optional<uint64_t> available_bytes;
-    bool partial_exists = false;
-    ConvertError error;
-    /// 양자화 대상이 없으면 값 없음.
-    std::optional<int> hqq_iterations;
-};
-
 struct ConvertProgress {
     ConvertStage stage = ConvertStage::Validating;
     std::string component;
@@ -109,9 +93,6 @@ private:
 };
 
 using ProgressCallback = std::function<void(const ConvertProgress&)>;
-
-/// 헤더·manifest만 검사한다. 가중치 본문의 유한성은 변환 중 검사한다.
-InspectResult inspect(const ConvertOptions& options);
 
 /// 호출 스레드에서 실행한다. 콜백도 같은 스레드에서 호출한다.
 /// 작업 스레드는 호출자가 준비하고 취소 토큰은 반환까지 유지한다.

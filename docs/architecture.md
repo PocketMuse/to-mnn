@@ -91,7 +91,6 @@ docs/
 함수 역할:
 | 함수 | 역할 |
 | --- | --- |
-| `inspect` | 파일 추론 없이 입력·템플릿을 검사하고 예상 출력 정보 반환 |
 | `convert` | 검사·계획 생성·청크 변환·출력 공개를 조율하고 결과 반환 |
 | `cleanup_partial` | 소유 표식을 검증하고 중단된 임시 출력 정리 |
 | `build_conversion_plan` | manifest·원본 텐서 정보를 검증해 `ConversionPlan` 추론 |

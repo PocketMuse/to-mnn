@@ -14,7 +14,6 @@ F32/F16 safetensors와 템플릿으로 MNN 모델을 만든다.
 
 | API | 용도 |
 | --- | --- |
-| `inspect` | 변환 전 입력 검사·예상 출력 조회 |
 | `convert` | 동기 변환·진행 알림 |
 | `CancellationToken::request_cancel` / `is_requested` | 동기 변환 취소 요청·확인 |
 | `cleanup_partial` | 중단된 임시 출력 정리 |
@@ -50,7 +49,6 @@ options.thread_count = 4;
 
 | 기능 | 실행 방식·주의점 |
 | --- | --- |
-| `inspect` | 동기 파일 검사. UI 밖의 작업 스레드에서 호출하며 NaN/Inf 등 가중치 본문은 검사하지 않음 |
 | `convert` | 동기 변환. UI 밖의 작업 스레드에서 호출하며 진행 콜백도 같은 스레드에서 실행 |
 | `cleanup_partial` | 동기 파일 정리. UI 밖의 작업 스레드에서 호출 |
 
@@ -74,7 +72,7 @@ if (result.status == sd15::ConvertStatus::Failed) {
 * Expo 연결 계층은 작업 실행·토큰 수명·진행 이벤트·최종 결과 전달을 담당한다. JS에는 비동기 호출로 노출하고 작업 스레드에서 동기 `convert`를 호출한다.
 * 기존 `ConversionService` 호출자는 동기 `convert(options, callback, token)`로 이전한다. 작업 ID·상태 보관이 필요하면 호출 계층에서 관리한다.
 
-> `inspect` 선행 호출은 필수가 아니다. HQQ 계산 병렬화는 `thread_count`로 유지한다.
+> 입력·템플릿·저장 공간 검사는 `convert()` 내부에서 수행한다. HQQ 계산 병렬화는 `thread_count`로 유지한다.
 
 ### 4-3. 취소·수명·중단된 파일
 
@@ -83,7 +81,7 @@ if (result.status == sd15::ConvertStatus::Failed) {
 * 취소 요청은 완료가 아니다. `convert` 반환 후 `ConvertStatus::Cancelled`를 확인한다.
 * 토큰은 변환마다 새로 만들고 `convert` 반환까지 유지한다. 앱·모듈 종료 시에도 취소 요청만으로 토큰이나 콜백이 참조하는 자원을 해제하지 않는다.
 * 변환·정리는 프로세스 내 하나만 실행한다. 완료 전 중복 실행은 `Busy`이며 프로세스 간 잠금은 없다.
-* 기존 `.partial`은 자동으로 덮어쓰지 않는다. `inspect`의 `partial_exists` 또는 `StaleOutput` 확인 후 앱 소유 경로에서 `cleanup_partial(options)`로 정리한다. 소유 표식이 없거나 알 수 없는 파일·링크·하위 폴더가 있으면 정리를 거부한다.
+* 기존 `.partial`은 자동으로 덮어쓰지 않는다. `convert()`의 `StaleOutput` 오류 확인 후 앱 소유 경로에서 `cleanup_partial(options)`로 정리한다. 소유 표식이 없거나 알 수 없는 파일·링크·하위 폴더가 있으면 정리를 거부한다.
 * 저수준 `quantize_hqq`를 직접 호출하면 유한 입력과 버퍼 용량을 호출자가 보장한다. `payload`는 입력 원소 수만큼의 바이트, `alpha`는 float 2개가 필요하며 실패한 출력은 사용하지 않는다.
 
 ## 5. 공통 오류

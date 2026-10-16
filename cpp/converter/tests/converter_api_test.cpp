@@ -54,16 +54,13 @@ TEST_CASE("Converter API preserves state cancellation and error contracts") {
     save_manifest();
     sd15::ConvertOptions options{(root / "input.safetensors").string(), (root / "template").string(),
                                  (root / "out").string(), 4};
-    const auto info = sd15::inspect(options);
-    UNSCOPED_INFO("inspect output plan");
-    REQUIRE(info.ok);
-    REQUIRE(info.output_bytes == 8);
-    REQUIRE(info.files.size() == 1);
-    UNSCOPED_INFO("float template has no HQQ iterations");
-    REQUIRE(!info.hqq_iterations);
+    const auto convert_once = [&] {
+        const sd15::CancellationToken cancellation;
+        return sd15::convert(options, {}, cancellation);
+    };
     options.thread_count = 0;
     UNSCOPED_INFO("zero threads rejected");
-    REQUIRE(sd15::inspect(options).error.code == sd15::ErrorCode::InvalidInput);
+    REQUIRE(convert_once().error.code == sd15::ErrorCode::InvalidInput);
     options.thread_count = sd15::kMaxThreadCount + 1;
     sd15::CancellationToken invalid_threads;
     UNSCOPED_INFO("excessive threads rejected before writing");
@@ -71,13 +68,14 @@ TEST_CASE("Converter API preserves state cancellation and error contracts") {
     options.thread_count = 8;
     options.hqq_iterations = -1;
     UNSCOPED_INFO("negative iterations rejected");
-    REQUIRE(sd15::inspect(options).error.code == sd15::ErrorCode::InvalidInput);
+    REQUIRE(convert_once().error.code == sd15::ErrorCode::InvalidInput);
     options.hqq_iterations = sd15::kHqqIterations + 1;
     sd15::CancellationToken invalid_iterations;
     UNSCOPED_INFO("excessive iterations rejected before writing");
     REQUIRE(sd15::convert(options, {}, invalid_iterations).error.code == sd15::ErrorCode::InvalidInput);
     options.hqq_iterations = sd15::kHqqIterations;
-    UNSCOPED_INFO("inspect must not write");
+    UNSCOPED_INFO("invalid options must not write");
+    REQUIRE(!fs::exists(root / "out"));
     REQUIRE(!fs::exists(root / "out.partial"));
 
     sd15::CancellationToken token;
@@ -94,16 +92,18 @@ TEST_CASE("Converter API preserves state cancellation and error contracts") {
     REQUIRE(events.back().stage == sd15::ConvertStage::Completed);
     UNSCOPED_INFO("completed progress");
     REQUIRE(events.back().completed_bytes == 8);
+    REQUIRE(events.back().total_bytes == 8);
     REQUIRE(events.back().remaining_ms == 0);
     UNSCOPED_INFO("output result");
     REQUIRE(result.files.size() == 1);
     REQUIRE(result.files[0].size_bytes == 8);
+    REQUIRE(result.files[0].name == "test.mnn");
     std::ifstream output(root / "out/test.mnn", std::ios::binary);
     const std::string bytes((std::istreambuf_iterator<char>(output)), {});
     UNSCOPED_INFO("weight bytes unchanged");
     REQUIRE(bytes == std::string("MNN!\0\x3c\0\xbc", 8));
     UNSCOPED_INFO("structured existing output error");
-    REQUIRE(sd15::inspect(options).error.code == sd15::ErrorCode::OutputExists);
+    REQUIRE(convert_once().error.code == sd15::ErrorCode::OutputExists);
 
     options.output_dir = (root / "cancelled").string();
     sd15::CancellationToken cancelled;
@@ -168,21 +168,26 @@ TEST_CASE("Converter API preserves state cancellation and error contracts") {
 
     manifest["files"][0]["segments"][1]["source_shape"] = {1, 2};
     save_manifest();
-    const auto mismatch = sd15::inspect(options);
+    const auto mismatch = convert_once();
     UNSCOPED_INFO("shape error context");
+    REQUIRE(mismatch.status == sd15::ConvertStatus::Failed);
+    REQUIRE(!fs::exists(root / "cancelled.partial"));
     REQUIRE(mismatch.error.code == sd15::ErrorCode::TensorMismatch);
     REQUIRE(mismatch.error.tensor == "weight");
     manifest["files"][0]["segments"][1]["source_shape"] = {2};
     save_manifest();
 
     write(root / "template/manifest.json", "{");
-    const auto malformed = sd15::inspect(options);
+    const auto malformed = convert_once();
     UNSCOPED_INFO("manifest error context");
+    REQUIRE(malformed.status == sd15::ConvertStatus::Failed);
+    REQUIRE(!fs::exists(root / "cancelled.partial"));
     REQUIRE(malformed.error.code == sd15::ErrorCode::IncompatibleTemplate);
     REQUIRE(malformed.error.path == (root / "template/manifest.json").string());
     save_manifest();
-    UNSCOPED_INFO("previous validation error does not affect next inspection");
-    REQUIRE(sd15::inspect(options).ok);
+    UNSCOPED_INFO("previous validation error does not affect next conversion");
+    options.output_dir = (root / "validation-recovered").string();
+    REQUIRE(convert_once().status == sd15::ConvertStatus::Succeeded);
 
     options.output_dir = (root / "eta").string();
     auto second = manifest["files"][0];
@@ -223,8 +228,6 @@ TEST_CASE("Converter API preserves state cancellation and error contracts") {
     REQUIRE(fs::exists(root / "cancelled.partial/foreign"));
     write(root / "cancelled.partial/.sd15-converter.json", R"({"format":"sd15-mnn-template","files":["test.mnn"]})");
     write(root / "cancelled.partial/test.mnn", "partial");
-    UNSCOPED_INFO("detect stale output");
-    REQUIRE(sd15::inspect(options).partial_exists);
     UNSCOPED_INFO("refuse stale output");
     REQUIRE(sd15::convert(options, {}, eta_token).error.code == sd15::ErrorCode::StaleOutput);
     UNSCOPED_INFO("unknown file blocks entire cleanup");
@@ -303,10 +306,6 @@ TEST_CASE("Converter API preserves state cancellation and error contracts") {
     save_manifest();
     options.output_dir = (root / "hqq-zero").string();
     options.hqq_iterations = 0;
-    const auto quantized_info = sd15::inspect(options);
-    UNSCOPED_INFO("inspect reports zero refinement");
-    REQUIRE(quantized_info.ok);
-    REQUIRE(quantized_info.hqq_iterations == 0);
     sd15::CancellationToken quantized_token;
     const auto quantized_result = sd15::convert(options, {}, quantized_token);
     UNSCOPED_INFO("conversion reports effective refinement count");
