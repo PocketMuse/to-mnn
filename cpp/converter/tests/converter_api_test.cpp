@@ -1,11 +1,10 @@
 #include "sd15/converter.hpp"
-#include "sd15/conversion_service.hpp"
 
 #include <filesystem>
 #include <fstream>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_session.hpp>
-#include <condition_variable>
+#include <thread>
 #include <stdexcept>
 #include <vector>
 
@@ -251,52 +250,42 @@ TEST_CASE("Converter API preserves state cancellation and error contracts") {
     UNSCOPED_INFO("published result cannot be reversed");
     REQUIRE(committed.status == sd15::ConvertStatus::Succeeded);
 
-    options.output_dir = (root / "job").string();
-    sd15::ConversionService service;
-    std::mutex gate;
-    std::condition_variable ready;
-    bool entered = false;
-    bool release = false;
-    const auto job = service.start_conversion(options, [&](const auto& snapshot) {
-        if (snapshot.result) {
-            std::lock_guard<std::mutex> lock(gate);
-            ready.notify_all();
-            return;
-        }
-        std::unique_lock<std::mutex> lock(gate);
-        entered = true;
-        ready.notify_all();
-        ready.wait(lock, [&] { return release; });
-    });
-    UNSCOPED_INFO("job starts");
-    REQUIRE(job.job_id != 0);
-    {
-        std::unique_lock<std::mutex> lock(gate);
-        ready.wait(lock, [&] { return entered; });
-    }
-    UNSCOPED_INFO("reject simultaneous start");
-    CHECK(service.start_conversion(options).error.code == sd15::ErrorCode::Busy);
-    UNSCOPED_INFO("cancel known job");
-    CHECK(service.cancel_conversion(job.job_id));
-    UNSCOPED_INFO("cancel is idempotent");
-    CHECK(service.cancel_conversion(job.job_id));
-    UNSCOPED_INFO("cancelling state");
-    CHECK(service.get_conversion_status(job.job_id)->state == sd15::JobState::Cancelling);
-    UNSCOPED_INFO("unknown job");
-    CHECK(!service.get_conversion_status(job.job_id + 1));
-    {
-        std::lock_guard<std::mutex> lock(gate);
-        release = true;
-    }
-    ready.notify_all();
-    {
-        std::unique_lock<std::mutex> lock(gate);
-        ready.wait(lock, [&] { return service.get_conversion_status(job.job_id)->result.has_value(); });
-    }
-    UNSCOPED_INFO("terminal status retained");
-    REQUIRE(service.get_conversion_status(job.job_id)->state == sd15::JobState::Cancelled);
-    UNSCOPED_INFO("job cancellation cleanup");
-    REQUIRE(!fs::exists(root / "job.partial"));
+    options.output_dir = (root / "external-cancel").string();
+    manifest["files"].push_back(second);
+    save_manifest();
+    sd15::CancellationToken external;
+    const auto caller = std::this_thread::get_id();
+    bool saw_partial_output = false;
+    bool callbacks_on_caller = true;
+    const auto interrupted = sd15::convert(
+        options,
+        [&](const auto& progress) {
+            callbacks_on_caller = callbacks_on_caller && std::this_thread::get_id() == caller;
+            if (progress.stage != sd15::ConvertStage::Converting || progress.component != "second") {
+                return;
+            }
+            saw_partial_output = fs::is_regular_file(root / "external-cancel.partial/test.mnn");
+            // 변환 도중 다른 스레드가 취소를 요청한다. 시간 지연에 의존하지 않는다.
+            std::thread requester([&] {
+                external.request_cancel();
+                external.request_cancel();
+            });
+            requester.join();
+        },
+        external);
+    UNSCOPED_INFO("external cancellation after writing output");
+    REQUIRE(saw_partial_output);
+    REQUIRE(callbacks_on_caller);
+    REQUIRE(interrupted.status == sd15::ConvertStatus::Cancelled);
+    REQUIRE(interrupted.error.code == sd15::ErrorCode::None);
+    REQUIRE(interrupted.files.empty());
+    REQUIRE(!fs::exists(root / "external-cancel.partial"));
+    REQUIRE(!fs::exists(root / "external-cancel"));
+    sd15::CancellationToken fresh;
+    UNSCOPED_INFO("conversion recovers after external cancellation");
+    REQUIRE(sd15::convert(options, {}, fresh).status == sd15::ConvertStatus::Succeeded);
+    manifest["files"].erase(1);
+    save_manifest();
 
     const Json recipe = {{"algorithm", "hqq"}, {"bits", 8},           {"iterations", 20}, {"lp_norm", 0.7},
                          {"beta", 10.0},       {"group_elements", 2}, {"group_count", 1}};

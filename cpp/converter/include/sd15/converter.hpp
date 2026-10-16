@@ -114,6 +114,7 @@ using ProgressCallback = std::function<void(const ConvertProgress&)>;
 InspectResult inspect(const ConvertOptions& options);
 
 /// 호출 스레드에서 실행한다. 콜백도 같은 스레드에서 호출한다.
+/// 작업 스레드는 호출자가 준비하고 취소 토큰은 반환까지 유지한다.
 ConvertResult convert(const ConvertOptions& options, const ProgressCallback& on_progress,
                       const CancellationToken& cancellation);
 
