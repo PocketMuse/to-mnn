@@ -77,7 +77,23 @@ docs/
 * `Sd15Runtime`은 모델 객체를 멤버로 보관하지 않는다. `generate()`에서 CLIP → UNet → VAE 순서로 생성하고 각 단계가 끝나면 해제한다.
 * 프리뷰 모델은 첫 프리뷰에 생성하고 denoising 종료까지 UNet과 함께 유지한다.
 * CFG/DDIM·난수·픽셀 변환은 `diffusion.cpp`의 함수로 구현한다.
-* SD1.5 scheduler 설정은 고정 상수다. 요청 검증은 steps 범위만 확인하며 시간표를 만들지 않는다. 버퍼 크기·NaN/Inf·실행 실패 검사는 Runtime에서 유지한다.
+* SD1.5 scheduler 설정은 고정 상수다. 요청 검증은 steps 범위만 확인하며 시간표를 만들지 않는다. NaN/Inf·실행 실패 검사는 Runtime에서 유지한다.
+
+내부 버퍼 크기의 보장 경로:
+
+| 버퍼 | 생성·크기 보장 | 소비·유지 |
+| --- | --- | --- |
+| tokens | `ClipTokenizer::encode`가 77개로 resize | CLIP 입력 복사 |
+| context | CLIP 출력 `[1,77,768]`을 초기 연결에서 확인 | UNet까지 const 참조, 크기 변경 없음 |
+| latent | `initial_noise`가 16,384개 생성 | DDIM은 원소만 갱신, VAE는 복사 후 원소만 scale |
+| timestep | 호출마다 원소 하나로 생성 | UNet 입력 복사 |
+| noise | UNet 출력 `[1,4,64,64]`을 초기 연결에서 확인 | DDIM까지 const 참조 |
+| clean prediction | 프리뷰 스텝에서 latent 크기로 resize | 같은 스텝에서만 TAESD에 전달 |
+| decoded | VAE·TAESD 출력 `[1,3,512,512]`을 초기 연결에서 확인 | TAESD 후처리는 원소만 갱신, `pixels`에서 RGB8 변환 |
+
+* 출력 vector는 연결한 tensor의 host 복사에서 생성한다. 이 경로는 고정 shape이며 세션 resize를 하지 않는다는 전제다.
+* `ddim_step`의 동일 크기 조건과 `pixels`의 출력 크기는 내부 전제조건이다. Debug assertion으로 확인하고 Release에서는 재검사하지 않는다.
+* `MnnModelSession::input`은 가변 길이 vector를 고정 host 버퍼에 복사하는 경계다. 잘못된 내부 호출의 초과 쓰기·부족한 입력을 막는 크기 검사는 유지한다.
 
 ### 2-3. cpp Converter
 

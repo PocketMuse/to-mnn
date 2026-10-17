@@ -42,7 +42,7 @@ TEST_CASE("DDIM schedules keep every supported step count within the alpha table
     }
 }
 
-TEST_CASE("DDIM applies guidance and validates tensor sizes") {
+TEST_CASE("DDIM applies guidance") {
     std::vector<float> latent{1.0f, -2.0f};
     detail::ddim_step(latent, {0.0f, 0.0f}, {0.0f, 0.0f}, 7.5f, 0.25f, 1.0f);
     CHECK(latent[0] == 2.0f);
@@ -50,7 +50,23 @@ TEST_CASE("DDIM applies guidance and validates tensor sizes") {
     latent = {1.0f};
     detail::ddim_step(latent, {0.1f}, {0.3f}, 2.0f, 0.25f, 1.0f);
     CHECK(std::abs(latent[0] - 1.1339746f) < 1e-6f);
-    REQUIRE_THROWS_AS(detail::ddim_step(latent, {}, {0.0f}, 1, 0.25f, 1), std::invalid_argument);
+}
+
+TEST_CASE("Denoising preserves latent and preview buffer sizes across steps") {
+    auto latent = detail::initial_noise(42);
+    const std::vector<float> negative(kLatentElements, 0.1f);
+    const std::vector<float> positive(kLatentElements, 0.3f);
+    std::vector<float> clean;
+    const auto alpha = detail::alphas();
+    const auto times = detail::timesteps(20);
+    for (std::size_t i = 0; i < times.size(); ++i) {
+        const int previous = times[i] - detail::kTrainSteps / 20;
+        const bool preview = i % 2 == 0;
+        detail::ddim_step(latent, negative, positive, 7.5f, alpha[times[i]],
+                          previous >= 0 ? alpha[previous] : alpha.front(), preview ? &clean : nullptr);
+        REQUIRE(latent.size() == kLatentElements);
+        REQUIRE(clean.size() == kLatentElements);
+    }
 }
 
 TEST_CASE("Seeds preserve explicit values and resolve negative values") {
@@ -123,11 +139,22 @@ TEST_CASE("Pixels clamp and round decoded channels to RGB8") {
     decoded[2] = 2.0f / 255;
     decoded[3] = 2.5f / 255;
     const auto image = detail::pixels(decoded);
-    REQUIRE(image.rgb.size() >= 10);
+    REQUIRE(image.rgb.size() == decoded.size());
     CHECK(image.rgb[0] == 0);
     CHECK(image.rgb[1] == 128);
     CHECK(image.rgb[2] == 255);
     CHECK(image.rgb[3] == 128);
     CHECK(image.rgb[6] == 129);
     CHECK(image.rgb[9] == 129);
+}
+
+TEST_CASE("Runtime math rejects nonfinite results with valid buffer sizes") {
+    std::vector<float> latent(kLatentElements, 1.0f);
+    std::vector<float> noise(kLatentElements, 0.0f);
+    noise.back() = std::numeric_limits<float>::infinity();
+    REQUIRE_THROWS_AS(detail::ddim_step(latent, noise, noise, 7.5f, 0.25f, 1.0f), std::runtime_error);
+
+    std::vector<float> decoded(3 * kImageSize * kImageSize, 0.0f);
+    decoded.back() = std::numeric_limits<float>::quiet_NaN();
+    REQUIRE_THROWS_AS(detail::pixels(decoded), std::runtime_error);
 }

@@ -1,6 +1,7 @@
 #include "diffusion.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <limits>
 #include <random>
@@ -89,8 +90,9 @@ std::vector<float> alphas() {
 void ddim_step(std::vector<float>& latent, const std::vector<float>& unconditional,
                const std::vector<float>& conditional, float guidance, float alpha, float previous_alpha,
                std::vector<float>* clean_prediction) {
-    if (latent.size() != unconditional.size() || latent.size() != conditional.size() ||
-        !(alpha > 0 && alpha <= 1 && previous_alpha > 0 && previous_alpha <= 1) || !std::isfinite(guidance)) {
+    // latent는 크기를 유지하고 noise는 초기화 때 연결한 UNet 출력이다.
+    assert(latent.size() == unconditional.size() && latent.size() == conditional.size());
+    if (!(alpha > 0 && alpha <= 1 && previous_alpha > 0 && previous_alpha <= 1) || !std::isfinite(guidance)) {
         throw std::invalid_argument("Invalid DDIM inputs");
     }
     const float signal = std::sqrt(alpha);
@@ -115,9 +117,8 @@ void ddim_step(std::vector<float>& latent, const std::vector<float>& uncondition
 
 Image pixels(const std::vector<float>& decoded) {
     constexpr std::size_t plane = kImageSize * kImageSize;
-    if (decoded.size() != 3 * plane) {
-        throw std::invalid_argument("Expected decoded shape [1, 3, 512, 512]");
-    }
+    // VAE·TAESD의 출력 shape는 모델 초기화에서 확인한다.
+    assert(decoded.size() == 3 * plane);
     Image image;
     image.rgb.resize(decoded.size());
     for (std::size_t i = 0; i < plane; ++i) {
