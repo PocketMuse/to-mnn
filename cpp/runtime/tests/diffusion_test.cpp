@@ -8,20 +8,38 @@
 using namespace sd15;
 
 TEST_CASE("DDIM timesteps and alphas match the schedule") {
-    detail::SchedulerConfig config;
-    const auto times = detail::timesteps(config, 20);
+    const auto times = detail::timesteps(20);
     REQUIRE(times.size() == 20);
     CHECK(times.front() == 951);
     CHECK(times.back() == 1);
-    REQUIRE_THROWS_AS(detail::timesteps(config, 0), std::invalid_argument);
-    REQUIRE_THROWS_AS(detail::timesteps(config, 1000), std::invalid_argument);
-    config.train_steps = 2;
-    config.beta_start = 0.1;
-    config.beta_end = 0.2;
-    const auto a = detail::alphas(config);
-    REQUIRE(a.size() == 2);
-    CHECK(std::abs(a[0] - 0.9f) < 1e-6f);
-    CHECK(std::abs(a[1] - 0.72f) < 1e-6f);
+    REQUIRE_THROWS_AS(detail::timesteps(0), std::invalid_argument);
+    REQUIRE_THROWS_AS(detail::timesteps(1000), std::invalid_argument);
+    const auto a = detail::alphas();
+    REQUIRE(a.size() == 1000);
+    CHECK(std::abs(a.front() - 0.99915f) < 1e-6f);
+    // SD1.5 scaled-linear schedule의 독립적인 double 기준값과 비교한다.
+    double expected = 1;
+    for (int i = 0; i < 1000; ++i) {
+        const double fraction = i / 999.0;
+        const double root = (1 - fraction) * std::sqrt(0.00085) + fraction * std::sqrt(0.012);
+        expected *= 1 - root * root;
+        CHECK(std::abs(a[i] - expected) < 2e-6);
+    }
+}
+
+TEST_CASE("DDIM schedules keep every supported step count within the alpha table") {
+    for (int steps = 1; steps < 1000; ++steps) {
+        GenerateOptions options;
+        options.steps = steps;
+        REQUIRE_NOTHROW(detail::validate(options));
+        const auto times = detail::timesteps(steps);
+        REQUIRE(times.size() == static_cast<std::size_t>(steps));
+        REQUIRE(times.back() == 1);
+        REQUIRE(times.front() < 1000);
+        for (std::size_t i = 1; i < times.size(); ++i) {
+            REQUIRE(times[i - 1] - times[i] == 1000 / steps);
+        }
+    }
 }
 
 TEST_CASE("DDIM applies guidance and validates tensor sizes") {
@@ -72,6 +90,8 @@ TEST_CASE("Generation options reject invalid seeds steps and guidance") {
     options.prompt = "a cat";
     detail::validate(options);
     options.steps = 0;
+    REQUIRE_THROWS_AS(detail::validate(options), std::invalid_argument);
+    options.steps = 1000;
     REQUIRE_THROWS_AS(detail::validate(options), std::invalid_argument);
     options.steps = 20;
     options.guidance = std::numeric_limits<float>::quiet_NaN();

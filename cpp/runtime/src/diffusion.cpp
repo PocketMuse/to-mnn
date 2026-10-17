@@ -9,29 +9,26 @@
 namespace sd15::detail {
 namespace {
 
-void check_scheduler(const SchedulerConfig& config) {
-    if (config.train_steps < 2 || config.train_steps > 10000 || config.steps_offset < 0 ||
-        config.steps_offset >= config.train_steps || !std::isfinite(config.beta_start) ||
-        !std::isfinite(config.beta_end) || config.beta_start <= 0 || config.beta_start > config.beta_end ||
-        config.beta_end >= 1) {
-        throw std::invalid_argument("Invalid scaled-linear scheduler configuration");
+constexpr double kBetaStart = 0.00085;
+constexpr double kBetaEnd = 0.012;
+constexpr int kStepsOffset = 1;
+static_assert(kTrainSteps > 1 && kStepsOffset == 1);
+static_assert(kBetaStart > 0 && kBetaStart <= kBetaEnd && kBetaEnd < 1);
+
+void validate_steps(int steps) {
+    if (steps < 1 || steps >= kTrainSteps) {
+        throw std::invalid_argument("steps must be in [1, train_steps)");
     }
 }
 
 } // namespace
 
-std::vector<int> timesteps(const SchedulerConfig& config, int steps) {
-    check_scheduler(config);
-    if (steps < 1 || steps >= config.train_steps) {
-        throw std::invalid_argument("steps must be in [1, train_steps)");
-    }
-    const int stride = config.train_steps / steps;
+std::vector<int> timesteps(int steps) {
+    validate_steps(steps);
+    const int stride = kTrainSteps / steps;
     std::vector<int> values;
     for (int i = steps - 1; i >= 0; --i) {
-        const int time = i * stride + config.steps_offset;
-        if (time >= config.train_steps) {
-            throw std::invalid_argument("Timestep outside training schedule");
-        }
+        const int time = i * stride + kStepsOffset;
         values.push_back(time);
     }
     return values;
@@ -44,7 +41,7 @@ void validate(const GenerateOptions& options) {
     if (options.seed > std::numeric_limits<uint32_t>::max()) {
         throw std::invalid_argument("seed must be negative or in [0, 4294967295]");
     }
-    timesteps(SchedulerConfig{}, options.steps);
+    validate_steps(options.steps);
     if (!std::isfinite(options.guidance)) {
         throw std::invalid_argument("Guidance must be finite");
     }
@@ -73,13 +70,12 @@ std::vector<float> initial_noise(uint32_t seed) {
     return latent;
 }
 
-std::vector<float> alphas(const SchedulerConfig& config) {
-    check_scheduler(config);
-    const double first = std::sqrt(config.beta_start);
-    const double step = (std::sqrt(config.beta_end) - first) / (config.train_steps - 1);
+std::vector<float> alphas() {
+    const double first = std::sqrt(kBetaStart);
+    const double step = (std::sqrt(kBetaEnd) - first) / (kTrainSteps - 1);
     float product = 1;
     std::vector<float> result;
-    for (int i = 0; i < config.train_steps; ++i) {
+    for (int i = 0; i < kTrainSteps; ++i) {
         const float root = static_cast<float>(first + i * step);
         product *= 1.0f - root * root;
         if (!std::isfinite(product) || product <= 0) {

@@ -77,6 +77,7 @@ docs/
 * `Sd15Runtime`은 모델 객체를 멤버로 보관하지 않는다. `generate()`에서 CLIP → UNet → VAE 순서로 생성하고 각 단계가 끝나면 해제한다.
 * 프리뷰 모델은 첫 프리뷰에 생성하고 denoising 종료까지 UNet과 함께 유지한다.
 * CFG/DDIM·난수·픽셀 변환은 `diffusion.cpp`의 함수로 구현한다.
+* SD1.5 scheduler 설정은 고정 상수다. 요청 검증은 steps 범위만 확인하며 시간표를 만들지 않는다. 버퍼 크기·NaN/Inf·실행 실패 검사는 Runtime에서 유지한다.
 
 ### 2-3. cpp Converter
 

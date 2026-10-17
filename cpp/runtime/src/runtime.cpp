@@ -73,7 +73,6 @@ Image Sd15Runtime::generate_impl(const GenerateOptions& request, const Inference
     const auto& root = impl_->root;
     const auto tokens = impl_->tokenizer.encode(options.prompt);
     const auto negative_tokens = impl_->tokenizer.encode(options.negative_prompt);
-    const detail::SchedulerConfig scheduler;
     const auto notify = [&](const char* stage, int step = 0) {
         detail::check_cancellation(cancellation);
         if (progress) {
@@ -81,8 +80,8 @@ Image Sd15Runtime::generate_impl(const GenerateOptions& request, const Inference
         }
         detail::check_cancellation(cancellation);
     };
-    const auto alpha = detail::alphas(scheduler);
-    const auto times = detail::timesteps(scheduler, options.steps);
+    const auto alpha = detail::alphas();
+    const auto times = detail::timesteps(options.steps);
     std::vector<float> negative_context;
     std::vector<float> context;
     {
@@ -101,9 +100,9 @@ Image Sd15Runtime::generate_impl(const GenerateOptions& request, const Inference
             const int time = times[i];
             const auto negative = unet.predict(latent, time, negative_context);
             const auto positive = unet.predict(latent, time, context);
-            const int previous = time - scheduler.train_steps / options.steps;
-            const float previous_alpha =
-                previous >= 0 ? alpha[previous] : (scheduler.set_alpha_to_one ? 1.0f : alpha.front());
+            const int previous = time - detail::kTrainSteps / options.steps;
+            // SD1.5는 set_alpha_to_one=false다.
+            const float previous_alpha = previous >= 0 ? alpha[previous] : alpha.front();
             const bool preview_step = options.preview_interval > 0 && (i + 1) % options.preview_interval == 0;
             detail::ddim_step(latent, negative, positive, options.guidance, alpha[time], previous_alpha,
                               preview_step ? &clean_prediction : nullptr);
