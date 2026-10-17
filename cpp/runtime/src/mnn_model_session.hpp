@@ -24,27 +24,46 @@ inline void check_cancellation(const GenerationCancellationToken* cancellation) 
 // ModelOptions는 Sd15Runtime 생성 시 검증한다.
 class MnnModelSession {
 public:
+    // 연결은 세션과 같은 수명이며 세션 resize 없이 재사용한다.
+    template <typename T> struct Input {
+        MNN::Tensor* tensor;
+        std::string name;
+        std::vector<int> shape;
+    };
+
+    struct Output {
+        MNN::Tensor* tensor;
+        std::string name;
+    };
+
     MnnModelSession(const std::filesystem::path& path, std::size_t input_count, const ModelOptions& options,
                     const GenerationCancellationToken* cancellation = nullptr);
 
-    template <typename T> void input(const char* name, const std::vector<int>& shape, const std::vector<T>& values) {
+    template <typename T> Input<T> bind_input(const char* name, const std::vector<int>& shape) {
         check_cancellation(cancellation_);
         auto* tensor = interpreter_->getSessionInput(session_, name);
         check<T>(tensor, name, shape);
-        if (tensor->elementSize() != static_cast<int>(values.size())) {
-            throw std::runtime_error(std::string("Input size mismatch: ") + name);
+        return {tensor, name, shape};
+    }
+
+    Output bind_output(const char* name, const std::vector<int>& shape);
+
+    template <typename T> void input(const Input<T>& binding, const std::vector<T>& values) {
+        check_cancellation(cancellation_);
+        if (binding.tensor->elementSize() != static_cast<int>(values.size())) {
+            throw std::runtime_error("Input size mismatch: " + binding.name);
         }
-        std::unique_ptr<MNN::Tensor> host(MNN::Tensor::create<T>(shape, nullptr, MNN::Tensor::CAFFE));
+        std::unique_ptr<MNN::Tensor> host(MNN::Tensor::create<T>(binding.shape, nullptr, MNN::Tensor::CAFFE));
         if (!host || host->host<T>() == nullptr) {
             throw std::runtime_error("Cannot allocate host input");
         }
         std::copy(values.begin(), values.end(), host->host<T>());
-        if (!tensor->copyFromHostTensor(host.get())) {
-            throw std::runtime_error(std::string("Cannot copy input: ") + name);
+        if (!binding.tensor->copyFromHostTensor(host.get())) {
+            throw std::runtime_error("Cannot copy input: " + binding.name);
         }
     }
 
-    std::vector<float> run(const char* name, const std::vector<int>& shape);
+    std::vector<float> run(const Output& binding);
 
 private:
     const GenerationCancellationToken* cancellation_;

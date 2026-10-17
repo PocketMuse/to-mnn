@@ -121,11 +121,12 @@ TEST_CASE("OpenCL cancellation latency experiment", "[.][opencl-cancellation-exp
         const std::vector<int> output_shape = unet ? std::vector<int>{1, 4, 64, 64} : std::vector<int>{1, 3, 512, 512};
         const char* output_name = unet ? "out_sample" : "sample";
         const auto prepare = [&](sd15::detail::MnnModelSession& session) {
-            session.input(unet ? "sample" : "latent_sample", {1, 4, 64, 64},
+            session.input(session.bind_input<float>(unet ? "sample" : "latent_sample", {1, 4, 64, 64}),
                           std::vector<float>(sd15::kLatentElements, 0.1f));
             if (unet) {
-                session.input<int32_t>("timestep", {1}, {500});
-                session.input("encoder_hidden_states", {1, 77, 768}, std::vector<float>(77 * 768, 0.1f));
+                session.input(session.bind_input<int32_t>("timestep", {1}), {500});
+                session.input(session.bind_input<float>("encoder_hidden_states", {1, 77, 768}),
+                              std::vector<float>(77 * 768, 0.1f));
             }
         };
         const auto path = std::filesystem::path(model_dir) / (model + ".mnn");
@@ -133,8 +134,9 @@ TEST_CASE("OpenCL cancellation latency experiment", "[.][opencl-cancellation-exp
         {
             sd15::detail::MnnModelSession session(path, unet ? 3 : 1, {});
             prepare(session);
+            const auto output = session.bind_output(output_name, output_shape);
             const auto start = Clock::now();
-            expected = session.run(output_name, output_shape);
+            expected = session.run(output);
             std::cout << model
                       << " baseline_ms=" << std::chrono::duration<double, std::milli>(Clock::now() - start).count()
                       << std::endl;
@@ -143,6 +145,7 @@ TEST_CASE("OpenCL cancellation latency experiment", "[.][opencl-cancellation-exp
             sd15::GenerationCancellationToken cancellation;
             sd15::detail::MnnModelSession session(path, unet ? 3 : 1, {}, &cancellation);
             prepare(session);
+            const auto output = session.bind_output(output_name, output_shape);
             // 로딩·입력 복사 후 취소를 예약한다. 실제 요청 시점은 스케줄링에 의존한다.
             const auto start = Clock::now();
             std::thread requester([&] {
@@ -151,7 +154,7 @@ TEST_CASE("OpenCL cancellation latency experiment", "[.][opencl-cancellation-exp
             });
             std::exception_ptr failure;
             try {
-                session.run(output_name, output_shape);
+                session.run(output);
             }
             catch (...) {
                 failure = std::current_exception();
@@ -166,7 +169,7 @@ TEST_CASE("OpenCL cancellation latency experiment", "[.][opencl-cancellation-exp
         sd15::GenerationCancellationToken fresh;
         sd15::detail::MnnModelSession recovered(path, unet ? 3 : 1, {}, &fresh);
         prepare(recovered);
-        CHECK(recovered.run(output_name, output_shape) == expected);
+        CHECK(recovered.run(recovered.bind_output(output_name, output_shape)) == expected);
     }
 }
 

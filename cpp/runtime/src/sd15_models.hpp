@@ -12,6 +12,8 @@ public:
 
 private:
     MnnModelSession session_;
+    MnnModelSession::Input<int32_t> tokens_;
+    MnnModelSession::Output context_;
 };
 
 class UNetDenoiser {
@@ -22,6 +24,10 @@ public:
 
 private:
     MnnModelSession session_;
+    MnnModelSession::Input<float> latent_;
+    MnnModelSession::Input<int32_t> timestep_;
+    MnnModelSession::Input<float> context_;
+    MnnModelSession::Output noise_;
 };
 
 class PreviewDecoder {
@@ -32,6 +38,8 @@ public:
 
 private:
     MnnModelSession session_;
+    MnnModelSession::Input<float> latent_;
+    MnnModelSession::Output image_;
 };
 
 class VaeDecoder {
@@ -43,6 +51,8 @@ public:
 
 private:
     MnnModelSession session_;
+    MnnModelSession::Input<float> latent_;
+    MnnModelSession::Output image_;
 };
 
 } // namespace sd15::detail

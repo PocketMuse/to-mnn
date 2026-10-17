@@ -73,6 +73,7 @@ docs/
 | `MnnModelSession` | 모델 로딩·실행·텐서 복사 및 검증 | `MNN::Interpreter`와 그에 속한 세션 |
 
 * 모델별 클래스는 입출력 계약과 전후처리를 담당하고, 각각 소유한 `MnnModelSession`에 공통 실행을 맡긴다. 상속 관계는 없다.
+* 모델 생성 시 tensor 이름·shape·dtype를 한 번 확인하고 연결을 보관한다. 추론 중에는 연결을 재사용하며 입력 버퍼 크기·복사·실행 오류를 검사한다. 세션 resize는 사용하지 않는다.
 * `Sd15Runtime`은 모델 객체를 멤버로 보관하지 않는다. `generate()`에서 CLIP → UNet → VAE 순서로 생성하고 각 단계가 끝나면 해제한다.
 * 프리뷰 모델은 첫 프리뷰에 생성하고 denoising 종료까지 UNet과 함께 유지한다.
 * CFG/DDIM·난수·픽셀 변환은 `diffusion.cpp`의 함수로 구현한다.

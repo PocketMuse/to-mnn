@@ -87,10 +87,16 @@ MnnModelSession::MnnModelSession(const std::filesystem::path& path, std::size_t 
     }
 }
 
-std::vector<float> MnnModelSession::run(const char* name, const std::vector<int>& shape) {
+MnnModelSession::Output MnnModelSession::bind_output(const char* name, const std::vector<int>& shape) {
     check_cancellation(cancellation_);
     auto* tensor = interpreter_->getSessionOutput(session_, name);
     check<float>(tensor, name, shape);
+    return {tensor, name};
+}
+
+std::vector<float> MnnModelSession::run(const Output& binding) {
+    check_cancellation(cancellation_);
+    auto* tensor = binding.tensor;
     MNN::ErrorCode code;
     if (cancellation_ != nullptr) {
         // MNN 콜백 안에서는 예외를 던지지 않는다. after=false가 세션을 중단한다.
@@ -119,7 +125,7 @@ std::vector<float> MnnModelSession::run(const char* name, const std::vector<int>
     const float* data = host.host<float>();
     std::vector<float> result(data, data + host.elementSize());
     if (std::any_of(result.begin(), result.end(), [](float value) { return !std::isfinite(value); })) {
-        throw std::runtime_error(std::string("Non-finite output: ") + name);
+        throw std::runtime_error("Non-finite output: " + binding.name);
     }
     check_cancellation(cancellation_);
     return result;
