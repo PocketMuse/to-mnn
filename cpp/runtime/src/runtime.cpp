@@ -1,5 +1,6 @@
 #include "sd15/runtime.hpp"
 #include "diffusion.hpp"
+#include "ddim_scheduler.hpp"
 #include "clip_tokenizer.hpp"
 #include "sd15_models.hpp"
 
@@ -80,8 +81,7 @@ Image Sd15Runtime::generate_impl(const GenerateOptions& request, const Inference
         }
         detail::check_cancellation(cancellation);
     };
-    const auto alpha = detail::alphas();
-    const auto times = detail::timesteps(options.steps);
+    const detail::DdimScheduler scheduler(options.steps);
     std::vector<float> negative_context;
     std::vector<float> context;
     {
@@ -91,22 +91,24 @@ Image Sd15Runtime::generate_impl(const GenerateOptions& request, const Inference
         context = encoder.encode(tokens);
     }
     auto latent = detail::initial_noise(seed);
+    for (auto& value : latent) {
+        value *= scheduler.init_noise_sigma();
+    }
     {
         notify("unet");
         detail::UNetDenoiser unet(root / "unet.mnn", impl_->config.unet, cancellation);
         std::unique_ptr<detail::PreviewDecoder> preview_decoder;
         std::vector<float> clean_prediction;
-        for (int i = 0; i < options.steps; ++i) {
-            const int time = times[i];
-            const auto negative = unet.predict(latent, time, negative_context);
-            const auto positive = unet.predict(latent, time, context);
-            const int previous = time - detail::kTrainSteps / options.steps;
-            // SD1.5는 set_alpha_to_one=false다.
-            const float previous_alpha = previous >= 0 ? alpha[previous] : alpha.front();
+        for (std::size_t i = 0; i < scheduler.timesteps().size(); ++i) {
+            const int time = scheduler.timesteps()[i];
+            const auto& model_input = scheduler.scale_model_input(latent, i);
+            auto noise = unet.predict(model_input, time, negative_context);
+            const auto positive = unet.predict(model_input, time, context);
+            detail::apply_guidance(noise, positive, options.guidance);
             const bool preview_step = options.preview_interval > 0 && (i + 1) % options.preview_interval == 0;
-            detail::ddim_step(latent, negative, positive, options.guidance, alpha[time], previous_alpha,
-                              preview_step ? &clean_prediction : nullptr);
-            notify("denoising", i + 1);
+            scheduler.step(latent, noise, i, preview_step ? &clean_prediction : nullptr);
+            const int completed = static_cast<int>(i + 1);
+            notify("denoising", completed);
             if (preview_step) {
                 if (!preview_decoder) {
                     preview_decoder = std::make_unique<detail::PreviewDecoder>(impl_->config.preview_decoder_path,
@@ -115,7 +117,7 @@ Image Sd15Runtime::generate_impl(const GenerateOptions& request, const Inference
                 auto image = preview_decoder->decode(clean_prediction);
                 image.seed = seed;
                 detail::check_cancellation(cancellation);
-                preview(i + 1, options.steps, image);
+                preview(completed, options.steps, image);
                 detail::check_cancellation(cancellation);
             }
         }

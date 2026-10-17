@@ -103,7 +103,8 @@ docs/
 
 | 클래스 | 역할 | 소유하는 주요 객체 |
 | --- | --- | --- |
-| `Sd15Runtime` | 추론 순서·CFG/DDIM·진행·취소 관리 | `Impl` |
+| `Sd15Runtime` | 추론 순서·CFG·진행·취소 관리 | `Impl` |
+| `DdimScheduler` | leading 시간표·alpha·DDIM 갱신·프리뷰 예측 | 요청별 시간표·누적 alpha |
 | `Sd15Runtime::Impl` | 추론 간 유지할 설정·상태 보관 | `RuntimeOptions`, `ClipTokenizer`, busy 상태 |
 | `ClipTokenizer` | prompt → token IDs | 어휘·BPE 병합 규칙 |
 | `ClipEncoder` | token IDs → embedding | `MnnModelSession` |
@@ -116,7 +117,9 @@ docs/
 * 모델 생성 시 tensor 이름·shape·dtype를 한 번 확인하고 연결을 보관한다. 추론 중에는 연결을 재사용하며 입력 버퍼 크기·복사·실행 오류를 검사한다. 세션 resize는 사용하지 않는다.
 * `Sd15Runtime`은 모델 객체를 멤버로 보관하지 않는다. `generate()`에서 CLIP → UNet → VAE 순서로 생성하고 각 단계가 끝나면 해제한다.
 * 프리뷰 모델은 첫 프리뷰에 생성하고 denoising 종료까지 UNet과 함께 유지한다.
-* CFG/DDIM·난수·픽셀 변환은 `diffusion.cpp`의 함수로 구현한다.
+* CFG·난수·픽셀 변환은 `diffusion.cpp`, DDIM 계산은 `ddim_scheduler.cpp`에서 구현한다.
+* Runtime은 scheduler의 시간표를 순회하며 입력 스케일링 → UNet·CFG → scheduler 갱신을 실행한다. 진행·취소·프리뷰 전달은 Runtime이 담당한다.
+* `DdimScheduler`는 요청마다 생성한다. leading·offset 1·eta 0·set_alpha_to_one=false를 유지하며, 초기 노이즈 배율은 1이고 모델 입력 스케일링은 항등이다. 공개 옵션·다른 알고리즘·공통 기반 클래스는 추가하지 않는다.
 * SD1.5 scheduler 설정은 고정 상수다. 요청 검증은 steps 범위만 확인하며 시간표를 만들지 않는다. NaN/Inf·실행 실패 검사는 Runtime에서 유지한다.
 
 내부 버퍼 크기의 보장 경로:
@@ -127,12 +130,12 @@ docs/
 | context | CLIP 출력 `[1,77,768]`을 초기 연결에서 확인 | UNet까지 const 참조, 크기 변경 없음 |
 | latent | `initial_noise`가 16,384개 생성 | DDIM은 원소만 갱신, VAE는 복사 후 원소만 scale |
 | timestep | 호출마다 원소 하나로 생성 | UNet 입력 복사 |
-| noise | UNet 출력 `[1,4,64,64]`을 초기 연결에서 확인 | DDIM까지 const 참조 |
+| noise | UNet 출력 `[1,4,64,64]`을 초기 연결에서 확인 | CFG가 원소만 갱신하고 scheduler에 const 참조로 전달 |
 | clean prediction | 프리뷰 스텝에서 latent 크기로 resize | 같은 스텝에서만 TAESD에 전달 |
 | decoded | VAE·TAESD 출력 `[1,3,512,512]`을 초기 연결에서 확인 | TAESD 후처리는 원소만 갱신, `pixels`에서 RGB8 변환 |
 
 * 출력 vector는 연결한 tensor의 host 복사에서 생성한다. 이 경로는 고정 shape이며 세션 resize를 하지 않는다는 전제다.
-* `ddim_step`의 동일 크기 조건과 `pixels`의 출력 크기는 내부 전제조건이다. Debug assertion으로 확인하고 Release에서는 재검사하지 않는다.
+* CFG·DDIM의 동일 버퍼 크기, scheduler의 스텝 인덱스와 `pixels`의 출력 크기는 내부 전제조건이다. Debug assertion으로 확인하고 Release에서는 재검사하지 않는다.
 * `MnnModelSession::input`은 가변 길이 vector를 고정 host 버퍼에 복사하는 경계다. 잘못된 내부 호출의 초과 쓰기·부족한 입력을 막는 크기 검사는 유지한다.
 
 ### 2-3. cpp Converter
