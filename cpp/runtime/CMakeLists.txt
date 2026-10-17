@@ -4,7 +4,7 @@ find_package(nlohmann_json 3.11 CONFIG REQUIRED)
 find_package(ICU REQUIRED COMPONENTS uc i18n)
 
 add_library(sd15_runtime STATIC src/runtime.cpp src/diffusion.cpp src/clip_tokenizer.cpp
-    src/mnn_model_session.cpp src/sd15_models.cpp src/ddim_scheduler.cpp)
+    src/mnn_model_session.cpp src/sd15_models.cpp src/ddim_scheduler.cpp src/dpm_scheduler.cpp src/scheduler.cpp)
 target_include_directories(sd15_runtime PUBLIC include)
 target_link_libraries(sd15_runtime PRIVATE sd15_mnn ICU::uc ICU::i18n nlohmann_json::nlohmann_json)
 target_compile_features(sd15_runtime PUBLIC cxx_std_17)
@@ -48,7 +48,8 @@ if(BUILD_TESTING)
         add_test(NAME runtime_generation COMMAND sd15-generation-test --model-dir "${SD15_TEST_MODEL_DIR}" --tokenizer-dir "${SD15_TEST_TOKENIZER_DIR}")
         set_tests_properties(runtime_generation PROPERTIES TIMEOUT 600)
     endif()
-    add_executable(sd15-runtime-test tests/diffusion_test.cpp src/diffusion.cpp src/ddim_scheduler.cpp)
+    add_executable(sd15-runtime-test tests/diffusion_test.cpp tests/dpm_scheduler_test.cpp
+        src/diffusion.cpp src/ddim_scheduler.cpp src/dpm_scheduler.cpp src/scheduler.cpp)
     target_include_directories(sd15-runtime-test PRIVATE include src)
     target_compile_features(sd15-runtime-test PRIVATE cxx_std_17)
     target_link_libraries(sd15-runtime-test PRIVATE Catch2::Catch2WithMain)

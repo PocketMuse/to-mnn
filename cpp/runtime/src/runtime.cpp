@@ -1,6 +1,6 @@
 #include "sd15/runtime.hpp"
 #include "diffusion.hpp"
-#include "ddim_scheduler.hpp"
+#include "scheduler.hpp"
 #include "clip_tokenizer.hpp"
 #include "sd15_models.hpp"
 
@@ -81,7 +81,7 @@ Image Sd15Runtime::generate_impl(const GenerateOptions& request, const Inference
         }
         detail::check_cancellation(cancellation);
     };
-    const detail::DdimScheduler scheduler(options.steps);
+    auto scheduler = detail::make_scheduler(options.sampling, options.steps);
     std::vector<float> negative_context;
     std::vector<float> context;
     {
@@ -92,21 +92,21 @@ Image Sd15Runtime::generate_impl(const GenerateOptions& request, const Inference
     }
     auto latent = detail::initial_noise(seed);
     for (auto& value : latent) {
-        value *= scheduler.init_noise_sigma();
+        value *= scheduler->init_noise_sigma();
     }
     {
         notify("unet");
         detail::UNetDenoiser unet(root / "unet.mnn", impl_->config.unet, cancellation);
         std::unique_ptr<detail::PreviewDecoder> preview_decoder;
         std::vector<float> clean_prediction;
-        for (std::size_t i = 0; i < scheduler.timesteps().size(); ++i) {
-            const int time = scheduler.timesteps()[i];
-            const auto& model_input = scheduler.scale_model_input(latent, i);
+        for (std::size_t i = 0; i < scheduler->timesteps().size(); ++i) {
+            const int time = scheduler->timesteps()[i];
+            const auto& model_input = scheduler->scale_model_input(latent, i);
             auto noise = unet.predict(model_input, time, negative_context);
             const auto positive = unet.predict(model_input, time, context);
             detail::apply_guidance(noise, positive, options.guidance);
             const bool preview_step = options.preview_interval > 0 && (i + 1) % options.preview_interval == 0;
-            scheduler.step(latent, noise, i, preview_step ? &clean_prediction : nullptr);
+            scheduler->step(latent, noise, i, preview_step ? &clean_prediction : nullptr);
             const int completed = static_cast<int>(i + 1);
             notify("denoising", completed);
             if (preview_step) {

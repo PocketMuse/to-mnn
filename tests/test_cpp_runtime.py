@@ -6,16 +6,51 @@ import tempfile
 import unittest
 from pathlib import Path
 
+SAMPLING_ARGS = ["--sampling", "ddim-leading", "--steps", "20", "--guidance", "7.5"]
+
 
 @unittest.skipUnless(os.environ.get("SD15_RUNTIME"), "C++ Runtime not selected")
 class RuntimeCliTest(unittest.TestCase):
+    def test_model_sampling_options_are_required(self):
+        required = {
+            "--sampling": "ddim-leading",
+            "--steps": "20",
+            "--guidance": "7.5",
+        }
+        with tempfile.TemporaryDirectory() as root:
+            for omitted in required:
+                with self.subTest(omitted=omitted):
+                    args = [
+                        os.environ["SD15_RUNTIME"],
+                        "--model-dir",
+                        root,
+                        "--prompt",
+                        "cat",
+                        "--seed",
+                        "42",
+                        "--preview-interval",
+                        "0",
+                        "--output",
+                        str(Path(root) / "out.png"),
+                    ]
+                    for flag, value in required.items():
+                        if flag != omitted:
+                            args += [flag, value]
+                    result = subprocess.run(args, capture_output=True, text=True)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(omitted, result.stderr)
+                    self.assertNotIn("Missing model:", result.stderr)
+
     def test_help(self):
         result = subprocess.run(
-            [os.environ["SD15_RUNTIME"], "--help"], capture_output=True, text=True
+            [os.environ["SD15_RUNTIME"], *SAMPLING_ARGS, "--help"],
+            capture_output=True,
+            text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--model-dir", result.stdout)
         self.assertIn("--prompt", result.stdout)
+        self.assertIn("--sampling", result.stdout)
         self.assertIn("--unet-precision", result.stdout)
         self.assertIn("--tuning", result.stdout)
         self.assertIn("--unet-low-memory", result.stdout)
@@ -38,11 +73,13 @@ class RuntimeCliTest(unittest.TestCase):
                 ("--input", "old.json", "--input"),
                 ("--unet-precision", "int8", "--unet-precision"),
                 ("--tuning", "invalid", "--tuning"),
+                ("--sampling", "unknown", "--sampling"),
             ]:
                 with self.subTest(flag=flag, value=value):
                     result = subprocess.run(
                         [
                             os.environ["SD15_RUNTIME"],
+                            *SAMPLING_ARGS,
                             "--model-dir",
                             root,
                             "--prompt",
@@ -58,6 +95,28 @@ class RuntimeCliTest(unittest.TestCase):
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn(message, result.stderr)
             self.assertFalse((Path(root) / "image.png").exists())
+
+    def test_sampling_presets_pass_parsing(self):
+        for preset in ("ddim-leading", "dpmpp-2m-karras"):
+            with self.subTest(preset=preset), tempfile.TemporaryDirectory() as root:
+                result = subprocess.run(
+                    [
+                        os.environ["SD15_RUNTIME"],
+                        *SAMPLING_ARGS,
+                        "--model-dir",
+                        root,
+                        "--prompt",
+                        "cat",
+                        "--sampling",
+                        preset,
+                        "--output",
+                        str(Path(root) / "image.png"),
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Missing model", result.stderr)
 
     def test_valid_seeds_pass_parsing(self):
         for seed in [None, "-1", "-42", "-9223372036854775808", "0", "4294967295"]:
@@ -77,6 +136,7 @@ class RuntimeCliTest(unittest.TestCase):
                         result = subprocess.run(
                             [
                                 os.environ["SD15_RUNTIME"],
+                                *SAMPLING_ARGS,
                                 "--model-dir",
                                 root,
                                 "--prompt",
@@ -98,6 +158,7 @@ class RuntimeCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             common = [
                 os.environ["SD15_RUNTIME"],
+                *SAMPLING_ARGS,
                 "--model-dir",
                 root,
                 "--prompt",
@@ -153,6 +214,7 @@ class RuntimeCliTest(unittest.TestCase):
                     result = subprocess.run(
                         [
                             os.environ["SD15_RUNTIME"],
+                            *SAMPLING_ARGS,
                             "--model-dir",
                             root,
                             "--prompt",
@@ -177,6 +239,7 @@ class RuntimeCliTest(unittest.TestCase):
             result = subprocess.run(
                 [
                     os.environ["SD15_RUNTIME"],
+                    *SAMPLING_ARGS,
                     "--model-dir",
                     root,
                     "--prompt",

@@ -5,14 +5,27 @@
 #include <catch2/catch_test_macros.hpp>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 
 #include "legacy_ddim.hpp"
 
 using namespace sd15;
 
+static_assert(!std::is_default_constructible_v<GenerateOptions>);
+
+TEST_CASE("Generation requires explicit sampling steps and guidance") {
+    GenerateOptions options(SamplingPreset::Dpmpp2mKarras, 33, 4.5f);
+    CHECK(options.sampling == SamplingPreset::Dpmpp2mKarras);
+    CHECK(options.steps == 33);
+    CHECK(options.guidance == 4.5f);
+    CHECK(options.seed == -1);
+    CHECK(options.preview_interval == 0);
+    REQUIRE_NOTHROW(detail::validate(options));
+}
+
 TEST_CASE("DDIM scheduler preserves the legacy trajectory and previews") {
     for (const int steps : {1, 2, 20, 33, 999}) {
-        const detail::DdimScheduler scheduler(steps);
+        detail::DdimScheduler scheduler(steps);
         const auto alpha = legacy::alphas();
         auto expected = detail::initial_noise(42);
         auto actual = expected;
@@ -38,7 +51,7 @@ TEST_CASE("DDIM scheduler preserves the legacy trajectory and previews") {
 }
 
 TEST_CASE("DDIM timesteps and alphas match the schedule") {
-    const detail::DdimScheduler scheduler(20);
+    detail::DdimScheduler scheduler(20);
     const auto& times = scheduler.timesteps();
     REQUIRE(times.size() == 20);
     CHECK(times.front() == 951);
@@ -54,7 +67,7 @@ TEST_CASE("DDIM timesteps and alphas match the schedule") {
         product *= 1 - root * root;
         alpha.push_back(product);
     }
-    const detail::DdimScheduler dense(999);
+    detail::DdimScheduler dense(999);
     for (std::size_t i = 0; i < dense.timesteps().size(); ++i) {
         const int time = dense.timesteps()[i];
         std::vector<float> latent{1.0f};
@@ -67,10 +80,10 @@ TEST_CASE("DDIM timesteps and alphas match the schedule") {
 
 TEST_CASE("DDIM schedules keep every supported step count within the alpha table") {
     for (int steps = 1; steps < 1000; ++steps) {
-        GenerateOptions options;
+        GenerateOptions options(SamplingPreset::DdimLeading, 20, 7.5f);
         options.steps = steps;
         REQUIRE_NOTHROW(detail::validate(options));
-        const detail::DdimScheduler scheduler(steps);
+        detail::DdimScheduler scheduler(steps);
         const auto& times = scheduler.timesteps();
         REQUIRE(times.size() == static_cast<std::size_t>(steps));
         REQUIRE(times.back() == 1);
@@ -98,7 +111,7 @@ TEST_CASE("Denoising preserves latent and preview buffer sizes across steps") {
     const std::vector<float> negative(kLatentElements, 0.1f);
     const std::vector<float> positive(kLatentElements, 0.3f);
     std::vector<float> clean;
-    const detail::DdimScheduler scheduler(20);
+    detail::DdimScheduler scheduler(20);
     auto noise = negative;
     detail::apply_guidance(noise, positive, 7.5f);
     for (std::size_t i = 0; i < scheduler.timesteps().size(); ++i) {
@@ -110,7 +123,7 @@ TEST_CASE("Denoising preserves latent and preview buffer sizes across steps") {
 }
 
 TEST_CASE("Seeds preserve explicit values and resolve negative values") {
-    GenerateOptions options;
+    GenerateOptions options(SamplingPreset::DdimLeading, 20, 7.5f);
     CHECK(options.seed == -1);
     CHECK(detail::resolve_seed(0) == 0);
     CHECK(detail::resolve_seed(42) == 42);
@@ -130,7 +143,7 @@ TEST_CASE("Seeds preserve explicit values and resolve negative values") {
 }
 
 TEST_CASE("DDIM exposes the clean prediction for previews") {
-    const detail::DdimScheduler scheduler(1);
+    detail::DdimScheduler scheduler(1);
     std::vector<float> latent{1.0f};
     std::vector<float> clean;
     scheduler.step(latent, {0.5f}, 0, &clean);
@@ -144,7 +157,7 @@ TEST_CASE("DDIM exposes the clean prediction for previews") {
 }
 
 TEST_CASE("Generation options reject invalid seeds steps and guidance") {
-    GenerateOptions options;
+    GenerateOptions options(SamplingPreset::DdimLeading, 20, 7.5f);
     options.seed = 4294967296LL;
     REQUIRE_THROWS_AS(detail::validate(options), std::invalid_argument);
     options.seed = -1;
@@ -197,7 +210,7 @@ TEST_CASE("Runtime math rejects nonfinite results with valid buffer sizes") {
     std::vector<float> latent(kLatentElements, 1.0f);
     std::vector<float> noise(kLatentElements, 0.0f);
     noise.back() = std::numeric_limits<float>::infinity();
-    const detail::DdimScheduler scheduler(20);
+    detail::DdimScheduler scheduler(20);
     REQUIRE_THROWS_AS(scheduler.step(latent, noise, 0), std::runtime_error);
 
     std::vector<float> decoded(3 * kImageSize * kImageSize, 0.0f);

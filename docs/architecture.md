@@ -105,6 +105,7 @@ docs/
 | --- | --- | --- |
 | `Sd15Runtime` | 추론 순서·CFG·진행·취소 관리 | `Impl` |
 | `DdimScheduler` | leading 시간표·alpha·DDIM 갱신·프리뷰 예측 | 요청별 시간표·누적 alpha |
+| `DpmScheduler` | Karras 시간표·DPM++ 2M 갱신·프리뷰 예측 | sigma·이전 x0·스텝 인덱스 |
 | `Sd15Runtime::Impl` | 추론 간 유지할 설정·상태 보관 | `RuntimeOptions`, `ClipTokenizer`, busy 상태 |
 | `ClipTokenizer` | prompt → token IDs | 어휘·BPE 병합 규칙 |
 | `ClipEncoder` | token IDs → embedding | `MnnModelSession` |
@@ -117,9 +118,12 @@ docs/
 * 모델 생성 시 tensor 이름·shape·dtype를 한 번 확인하고 연결을 보관한다. 추론 중에는 연결을 재사용하며 입력 버퍼 크기·복사·실행 오류를 검사한다. 세션 resize는 사용하지 않는다.
 * `Sd15Runtime`은 모델 객체를 멤버로 보관하지 않는다. `generate()`에서 CLIP → UNet → VAE 순서로 생성하고 각 단계가 끝나면 해제한다.
 * 프리뷰 모델은 첫 프리뷰에 생성하고 denoising 종료까지 UNet과 함께 유지한다.
-* CFG·난수·픽셀 변환은 `diffusion.cpp`, DDIM 계산은 `ddim_scheduler.cpp`에서 구현한다.
+* CFG·난수·픽셀 변환은 `diffusion.cpp`, 시간표·학습 노이즈·알고리즘별 계산은 각 scheduler에서 구현한다.
+* DDIM의 기존 누적 alpha 연산은 보존한다. DPM은 생성자에서 학습 beta·alpha·sigma·log-sigma와 Karras 시간표를 계산한다. beta·alpha는 FP32, 누적곱·보간은 double이며 추론용 sigma는 float로 저장한다. 요청 중에는 완성한 시간표를 재사용하며 정적 데이터 표나 Python에 의존하지 않는다.
+* DPM 테스트는 시간표의 범위·단조성·유한성과 오류 처리·요청별 상태 분리를 검증한다. Python 참조 JSON이나 생성 도구에 의존하지 않는다.
 * Runtime은 scheduler의 시간표를 순회하며 입력 스케일링 → UNet·CFG → scheduler 갱신을 실행한다. 진행·취소·프리뷰 전달은 Runtime이 담당한다.
-* `DdimScheduler`는 요청마다 생성한다. leading·offset 1·eta 0·set_alpha_to_one=false를 유지하며, 초기 노이즈 배율은 1이고 모델 입력 스케일링은 항등이다. 공개 옵션·다른 알고리즘·공통 기반 클래스는 추가하지 않는다.
+* `make_scheduler`는 `SamplingPreset`에 따라 요청별 `Scheduler` 전략을 생성한다. 현재 DDIM leading과 DPM++ 2M Karras만 지원하며 두 전략 모두 초기 노이즈 배율 1·항등 입력 스케일링을 사용한다.
+* DPM의 이력은 요청에 귀속된다. 취소·실패·완료 후 다음 요청은 새 전략으로 시작한다. 시간표의 정수 timestep이 중복되어도 배열 인덱스로 이력을 진행한다.
 * SD1.5 scheduler 설정은 고정 상수다. 요청 검증은 steps 범위만 확인하며 시간표를 만들지 않는다. NaN/Inf·실행 실패 검사는 Runtime에서 유지한다.
 
 내부 버퍼 크기의 보장 경로:

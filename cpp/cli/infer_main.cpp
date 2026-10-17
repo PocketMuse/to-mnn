@@ -13,6 +13,7 @@
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 namespace {
 
@@ -41,7 +42,12 @@ void save_png(const std::filesystem::path& output, const sd15::Image& image) {
 template <typename Char> int run(int argc, const Char* const* argv) {
     try {
         sd15::RuntimeOptions runtime_options;
-        sd15::GenerateOptions options;
+        std::string prompt;
+        std::string negative_prompt;
+        int64_t seed = -1;
+        int steps = 0;
+        float guidance = 0;
+        int preview_interval = 0;
         std::string output_name;
         std::string preview_directory;
         const std::array<std::string, 3> names{"clip", "unet", "vae"};
@@ -56,6 +62,10 @@ template <typename Char> int run(int argc, const Char* const* argv) {
                                                                 {"normal", sd15::Tuning::Normal},
                                                                 {"wide", sd15::Tuning::Wide}};
         std::string tuning = "none";
+        std::string sampling;
+        const std::map<std::string, sd15::SamplingPreset> sampling_values{
+            {"ddim-leading", sd15::SamplingPreset::DdimLeading},
+            {"dpmpp-2m-karras", sd15::SamplingPreset::Dpmpp2mKarras}};
         CLI::App app{"Generate an SD1.5 image with OpenCL"};
         const CLI::Validator nonempty(
             [](const std::string& value) { return value.empty() ? "Value must not be empty" : ""; }, "NONEMPTY");
@@ -74,16 +84,17 @@ template <typename Char> int run(int argc, const Char* const* argv) {
                 ->check(CLI::IsMember(tuning_values));
             app.add_flag(prefix + "-low-memory", models[i]->low_memory, "Use quantized-weight low-memory path");
         }
-        app.add_option("--prompt", options.prompt, "Prompt (UTF-8; may be empty)")->required();
-        app.add_option("--negative-prompt", options.negative_prompt, "Negative prompt");
-        app.add_option("--seed", options.seed, "Negative: random; otherwise uint32 seed")
+        app.add_option("--prompt", prompt, "Prompt (UTF-8; may be empty)")->required();
+        app.add_option("--negative-prompt", negative_prompt, "Negative prompt");
+        app.add_option("--seed", seed, "Negative: random; otherwise uint32 seed")
             ->check(CLI::Range(std::numeric_limits<int64_t>::min(), int64_t{std::numeric_limits<uint32_t>::max()}))
             ->capture_default_str();
-        app.add_option("--steps", options.steps, "DDIM steps")->check(CLI::Range(1, 999))->capture_default_str();
-        app.add_option("--guidance", options.guidance, "Finite guidance scale")->capture_default_str();
+        app.add_option("--sampling", sampling, "Sampling preset")->check(CLI::IsMember(sampling_values))->required();
+        app.add_option("--steps", steps, "Sampling steps")->check(CLI::Range(1, 999))->required();
+        app.add_option("--guidance", guidance, "Finite guidance scale")->required();
         app.add_option("--output", output_name, "New PNG file")->required()->check(nonempty);
         app.add_option("--preview-decoder", runtime_options.preview_decoder_path, "Local TAESD MNN decoder");
-        app.add_option("--preview-interval", options.preview_interval, "Preview every N steps; 0 disables")
+        app.add_option("--preview-interval", preview_interval, "Preview every N steps; 0 disables")
             ->check(CLI::Range(0, 999))
             ->capture_default_str();
         app.add_option("--preview-dir", preview_directory, "New directory for step PNGs");
@@ -94,6 +105,11 @@ template <typename Char> int run(int argc, const Char* const* argv) {
             app.exit(error);
             return error.get_exit_code() == 0 ? 0 : 1;
         }
+        sd15::GenerateOptions options(sampling_values.at(sampling), steps, guidance);
+        options.prompt = std::move(prompt);
+        options.negative_prompt = std::move(negative_prompt);
+        options.seed = seed;
+        options.preview_interval = preview_interval;
         for (std::size_t i = 0; i < models.size(); ++i) {
             models[i]->precision = precision_values.at(precisions[i]);
             if (app.count("--" + names[i] + "-tuning") == 0) {

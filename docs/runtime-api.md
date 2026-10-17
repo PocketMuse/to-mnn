@@ -6,7 +6,7 @@ prompt·negative prompt·seed로 이미지를 추론하는 동기 API
 * 입력: SD1.5 MNN 모델·CLIP tokenizer, 추론 옵션
 * 출력: seed와 512×512 RGB8 이미지
 * 실행 환경: Windows 네이티브 MNN 3.6.1, OpenCL buffer
-* 지원: batch 1, CFG + DDIM eta=0. scheduler·해상도는 고정
+* 지원: batch 1, CFG + DDIM eta=0 또는 DPM++ 2M Karras. 해상도는 고정
 * 공개 헤더: [runtime.hpp](../cpp/runtime/include/sd15/runtime.hpp)
 * 관련 문서: [아키텍처](architecture.md#2-2-cpp-runtime), [양자화 정책·검증](sd15.md), [모델 준비](../README.md)
 * Windows 빌드: [MNN 준비](../README.md#3-mnnruntime-빌드) 후 Git Bash에서 `bash scripts/build-runtime.sh` 실행. `VCPKG_ROOT` 필요
@@ -85,16 +85,25 @@ config.unet.low_memory = true;
 | `prompt` | `std::string` | 빈 문자열 | UTF-8, 최대 16KiB, 빈 문자열 허용 |
 | `negative_prompt` | `std::string` | 빈 문자열 | UTF-8, 최대 16KiB |
 | `seed` | `int64_t` | -1 | 음수이면 요청마다 임의의 seed, 양수·0은 0~4294967295 |
-| `steps` | `int` | 20 | 1~999 |
-| `guidance` | `float` | 7.5f | 유한값 |
+| `steps` | `int` | 없음·필수 | 1~999 |
+| `guidance` | `float` | 없음·필수 | 유한값 |
 | `preview_interval` | `int` | 0 | 0이면 끔, 양수이면 해당 간격마다 프리뷰 |
+| `sampling` | `SamplingPreset` | 없음·필수 | `DdimLeading`, `Dpmpp2mKarras` |
+
+* `GenerateOptions(sampling, steps, guidance)`로 생성한다. 기본 생성자는 없으며 세 값은 호출자가 모델에 맞게 지정한다.
 
 * `guidance`는 유한성만 검사하며 별도 범위 제한은 없다. `preview_interval`도 C++ API에서는 음수만 거부한다.
 * prompt는 CLIP 기준 최대 77 tokens로 자르고 마지막 EOS를 보존한다. BOS=49406, EOS/padding=49407이다.
 * NFC 정규화·Unicode 공백 병합·문자별 full lowercase를 적용한다. 비교 기준은 Transformers 5.17.0 / tokenizers 0.23.2의 Rust CLIP이며 ftfy를 사용하지 않는다.
 * 소문자화는 root locale의 문자별 처리다. `İ`는 `i` + 결합점, `ΟΣ`는 `οσ`가 된다. Unicode 데이터 버전 차이까지 포함한 모든 입력의 일치는 보장하지 않는다.
 * seed 재현은 동일 빌드·실행 환경 기준이다. 기존 NumPy seed 이미지와 Windows/Android 간 비트 일치는 보장하지 않는다.
-* scheduler는 scaled-linear/epsilon, train steps 1000, beta 0.00085~0.012, offset 1, alpha-to-one false다. VAE scale은 0.18215이며 공개 옵션으로 변경할 수 없다.
+* 학습 노이즈 설정은 scaled-linear/epsilon, train steps 1000, beta 0.00085~0.012다. VAE scale은 0.18215다.
+* `DdimLeading`은 기존 leading, offset 1, eta 0, alpha-to-one false를 유지한다.
+* `Dpmpp2mKarras`는 [Diffusers 0.40.0 구현](https://github.com/huggingface/diffusers/blob/v0.40.0/src/diffusers/schedulers/scheduling_dpmsolver_multistep.py)을 기준으로 한다. dpmsolver++, order 2, midpoint, Karras rho 7, final sigma 0, thresholding false이며 시작·마지막 스텝은 1차 갱신한다. 추가 난수는 사용하지 않는다.
+* CLI는 `--sampling`, `--steps`, `--guidance`를 반드시 지정한다. 예: `--sampling dpmpp-2m-karras --steps 20 --guidance 7.5`. 수치는 사용 예시이며 기본값이 아니다.
+* 기존 정수 timestep 모델을 사용한다. Euler/Euler a의 실수 linspace 시간표와 LCM 모델은 아직 지원하지 않는다.
+* DPM 프리뷰는 현재 모델 출력에서 계산한 x0다. 최종 스텝은 이 x0를 VAE에 전달한다. Diffusers의 알고리즘을 기준으로 구현했으나, 부동소수점 연산 차이로 timestep과 최종 이미지가 달라질 수 있으며 비트 단위 일치를 보장하지 않는다.
+* DPM 시간표는 초기화 시 계산한다. 반올림 경계에서는 부동소수점 차이로 Diffusers와 정수 timestep이 달라질 수 있으며, 최종 이미지에도 영향을 줄 수 있다. 특정 Python 환경의 시간표를 고정한 정적 표는 사용하지 않는다.
 
 > prompt 16KiB·tokenizer 파일당 4MiB는 임시 방어 제한이며 모델 규격에 따른 값은 아니다.
 
@@ -109,7 +118,7 @@ sd15::RuntimeOptions config;
 config.model_dir = "models/sd15";
 sd15::Sd15Runtime runtime(config);
 
-sd15::GenerateOptions request;
+sd15::GenerateOptions request(sd15::SamplingPreset::Dpmpp2mKarras, 20, 7.5f);
 request.prompt = "a photo of a cat";
 const auto image = runtime.generate(request);
 ```

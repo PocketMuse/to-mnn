@@ -28,10 +28,10 @@ TEST_CASE("Generation preserves requests seeds and recovery") {
     sd15::Sd15Runtime runtime(config);
     // 생성 후 호출자가 설정을 바꿔도 Runtime의 설정은 유지한다.
     config.unet.precision = static_cast<sd15::Precision>(-1);
-    sd15::GenerateOptions request;
+    sd15::GenerateOptions request(sd15::SamplingPreset::DdimLeading, 2, 7.5f);
     request.prompt = "a photo of a cat";
     request.negative_prompt = "blurry";
-    request.steps = 2;
+
     auto invalid = request;
     invalid.steps = 0;
     REQUIRE_THROWS_AS(runtime.generate(invalid), std::invalid_argument);
@@ -111,6 +111,33 @@ TEST_CASE("Generation preserves requests seeds and recovery") {
     CHECK(changed.seed == request.seed);
     UNSCOPED_INFO("Different seed did not change image");
     CHECK(first.rgb != changed.rgb);
+}
+
+TEST_CASE("DPM sampling preserves seeds progress cancellation and reuse") {
+    sd15::Sd15Runtime runtime({model_dir, tokenizer_dir});
+    sd15::GenerateOptions request(sd15::SamplingPreset::Dpmpp2mKarras, 3, 7.5f);
+    request.prompt = "a photo of a cat";
+    request.seed = 42;
+
+    std::vector<int> completed;
+    const auto first = runtime.generate(request, [&](const std::string& stage, int step, int total) {
+        CHECK(total == 3);
+        if (stage == "denoising") {
+            completed.push_back(step);
+        }
+    });
+    CHECK(completed == std::vector<int>{1, 2, 3});
+    CHECK(first.seed == 42);
+    REQUIRE(first.rgb.size() == 3 * sd15::kImageSize * sd15::kImageSize);
+    sd15::GenerationCancellationToken cancellation;
+    REQUIRE_THROWS_AS(runtime.generate(request, cancellation,
+                                       [&](const std::string& stage, int, int) {
+                                           if (stage == "denoising") {
+                                               cancellation.request_cancel();
+                                           }
+                                       }),
+                      sd15::GenerationCancelled);
+    CHECK(runtime.generate(request).rgb == first.rgb);
 }
 
 // 명시적으로 선택하는 시간 측정. 타이머는 MNN 콜백 내부 중단을 보장하지 않는다.

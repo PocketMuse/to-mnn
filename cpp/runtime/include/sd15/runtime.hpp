@@ -15,14 +15,20 @@ constexpr int kVocabularySize = 49408;
 constexpr int kLatentElements = 4 * 64 * 64;
 constexpr int kImageSize = 512;
 
+enum class SamplingPreset { DdimLeading, Dpmpp2mKarras };
+
 struct GenerateOptions {
+    GenerateOptions(SamplingPreset preset, int step_count, float guidance_scale)
+        : steps(step_count), guidance(guidance_scale), sampling(preset) {}
+
     std::string prompt;
     std::string negative_prompt;
     // 음수는 생성 요청마다 임의의 uint32 seed를 선택한다.
     int64_t seed = -1;
-    int steps = 20;
-    float guidance = 7.5f;
+    int steps;
+    float guidance;
     int preview_interval = 0; // 0은 끔. 마지막 스텝도 간격에 맞으면 전달한다.
+    SamplingPreset sampling;
 };
 
 enum class Precision { High, Normal, Low };
@@ -54,7 +60,7 @@ struct Image {
 };
 
 // 동기 실행. 콜백도 호출 스레드에서 실행하며 오류는 예외로 전달한다.
-// prompt는 UTF-8. batch 1, DDIM eta=0, OpenCL만 사용한다.
+// prompt는 UTF-8. batch 1, OpenCL만 사용한다.
 using InferenceProgress = std::function<void(const std::string& stage, int step, int total)>;
 // 호출 스레드에서 실행. 이미지를 보관하려면 콜백 안에서 복사한다.
 using InferencePreview = std::function<void(int step, int total, const Image& image)>;

@@ -16,6 +16,13 @@ void validate_steps(int steps) {
 }
 
 void validate(const GenerateOptions& options) {
+    switch (options.sampling) {
+    case SamplingPreset::DdimLeading:
+    case SamplingPreset::Dpmpp2mKarras:
+        break;
+    default:
+        throw std::invalid_argument("Invalid sampling preset");
+    }
     if (options.preview_interval < 0) {
         throw std::invalid_argument("Preview interval must be nonnegative");
     }

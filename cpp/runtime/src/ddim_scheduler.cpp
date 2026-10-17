@@ -73,7 +73,7 @@ DdimScheduler::DdimScheduler(int steps) : timesteps_(make_timesteps(steps)), alp
 }
 
 void DdimScheduler::step(std::vector<float>& latent, const std::vector<float>& model_output, std::size_t index,
-                         std::vector<float>* clean_prediction) const {
+                         std::vector<float>* clean_prediction) {
     assert(index < timesteps_.size());
     const int time = timesteps_[index];
     const int previous = time - kTrainSteps / static_cast<int>(timesteps_.size());

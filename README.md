@@ -126,12 +126,14 @@ bash scripts/build-mnn.sh
 
 * Windows C++에서 CLIP → UNet → VAE 실행과 PNG 저장
 * C++에서 prompt 토큰화와 seed 기반 초기 latent 생성.
+* `sd15-infer`는 `--sampling`, `--steps`, `--guidance`를 필수로 받는다. 예: `--sampling dpmpp-2m-karras --steps 20 --guidance 7.5`. 모델에 맞게 값을 지정하며 샘플링은 `ddim-leading`도 지원한다.
 * Runtime 빌드에는 `VCPKG_ROOT`가 필요하다. 실행 방법은 [Runtime 문서](docs/runtime-api.md) 참고.
 
 ## 테스트
 
 * 작은 테스트 데이터로 변환기·템플릿 생성기·비교기와 잘못된 입력 처리를 검사
 * 실제 모델 파일은 불필요
+* DPM 테스트는 시간표 범위·단조성·오류 처리·요청별 상태 분리를 검사한다. Python 참조 데이터는 사용하지 않는다.
 * C++ 검증은 Catch2, 실행 관리는 CTest를 사용한다. Python 통합 테스트는 unittest를 유지한다.
 * Catch2는 `BUILD_TESTING=ON`일 때 manifest의 `tests` 기능으로 선택하며 테스트 실행 파일에만 연결한다.
 
